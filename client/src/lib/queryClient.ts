@@ -1,6 +1,10 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
+// Use Render backend when deployed, local server in dev
+const RENDER_URL = "https://cryptonite-wt0e.onrender.com";
+const API_BASE = typeof window !== "undefined" && window.location.hostname !== "localhost"
+  ? RENDER_URL
+  : "";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {

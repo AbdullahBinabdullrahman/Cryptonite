@@ -4,8 +4,10 @@
  */
 import { useState, useEffect, useRef } from "react";
 
-// Use the same API base as queryClient so deployed calls go through the proxy
-const API_BASE = ("__PORT_5000__" as string).startsWith("__") ? "" : "__PORT_5000__";
+// Use Render backend when deployed, local server in dev
+const API_BASE = typeof window !== "undefined" && window.location.hostname !== "localhost"
+  ? "https://cryptonite-wt0e.onrender.com"
+  : "";
 
 export type AssetKey = "BTC" | "ETH" | "SOL";
 
