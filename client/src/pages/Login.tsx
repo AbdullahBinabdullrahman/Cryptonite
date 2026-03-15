@@ -1,9 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Zap, Mail, Shield, Smartphone, ArrowRight, Loader2, CheckCircle, Eye, EyeOff, RefreshCw } from "lucide-react";
+import {
+  Zap, Mail, Shield, Smartphone, ArrowRight, Loader2,
+  CheckCircle, Eye, EyeOff, RefreshCw, Lock, KeyRound,
+} from "lucide-react";
 
-type Step = "email" | "otp" | "totp" | "totp-setup";
+type Step = "credentials" | "otp" | "totp" | "totp-setup";
 
 interface LoginProps {
   onLogin: (email: string) => void;
@@ -64,14 +67,18 @@ function OtpInput({ length = 6, onComplete }: { length?: number; onComplete: (va
 // ── Main login component ──────────────────────────────────────────────────────
 export default function Login({ onLogin }: LoginProps) {
   const { toast } = useToast();
-  const [step, setStep]           = useState<Step>("email");
-  const [email, setEmail]         = useState("a.maher.bina@gmail.com");
-  const [loading, setLoading]     = useState(false);
-  const [countdown, setCountdown] = useState(0);
+  const [step, setStep]             = useState<Step>("credentials");
+  const [email, setEmail]           = useState("a.maher.bina@gmail.com");
+  const [password, setPassword]     = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading]       = useState(false);
+  const [countdown, setCountdown]   = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [totpSetup, setTotpSetup] = useState<{ secret: string; qrDataUrl: string } | null>(null);
+  const [totpSetup, setTotpSetup]   = useState<{ secret: string; qrDataUrl: string } | null>(null);
   const [showSecret, setShowSecret] = useState(false);
-  const [totpInput, setTotpInput] = useState("");
+  const [totpInput, setTotpInput]   = useState("");
+  // "otp" sub-mode: user chose to skip password and use OTP instead
+  const [useOtpMode, setUseOtpMode] = useState(false);
 
   // Countdown timer for resend
   useEffect(() => {
@@ -80,7 +87,30 @@ export default function Login({ onLogin }: LoginProps) {
     return () => clearInterval(t);
   }, [countdown]);
 
-  // ── Step 1: Send OTP ────────────────────────────────────────────────────────
+  // ── Password login ─────────────────────────────────────────────────────────
+  const loginWithPassword = async () => {
+    if (!email.trim() || !password) return;
+    setLoading(true);
+    try {
+      const res  = await apiRequest("POST", "/api/auth/login", {
+        email: email.trim(),
+        password,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Login failed");
+      if (data.totpRequired) {
+        setStep("totp");
+        return;
+      }
+      onLogin(data.email);
+    } catch (e: any) {
+      toast({ title: "Login failed", description: e.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Send OTP (fallback / no-password path) ─────────────────────────────────
   const sendOtp = async () => {
     if (!email.trim()) return;
     setLoading(true);
@@ -99,7 +129,7 @@ export default function Login({ onLogin }: LoginProps) {
     }
   };
 
-  // ── Step 2: Verify OTP ──────────────────────────────────────────────────────
+  // ── Verify OTP ─────────────────────────────────────────────────────────────
   const verifyOtp = async (code: string) => {
     setLoading(true);
     try {
@@ -107,12 +137,10 @@ export default function Login({ onLogin }: LoginProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Invalid code");
       if (data.totpEnabled) {
-        // Has TOTP set up — go to TOTP login
         setStep("totp");
         setLoading(false);
         return;
       }
-      // First login or no TOTP — offer TOTP setup
       onLogin(data.email);
     } catch (e: any) {
       toast({ title: "Invalid code", description: e.message, variant: "destructive" });
@@ -120,7 +148,7 @@ export default function Login({ onLogin }: LoginProps) {
     }
   };
 
-  // ── Step 3a: Verify TOTP ────────────────────────────────────────────────────
+  // ── Verify TOTP ────────────────────────────────────────────────────────────
   const verifyTotp = async (token: string) => {
     setLoading(true);
     try {
@@ -134,7 +162,7 @@ export default function Login({ onLogin }: LoginProps) {
     }
   };
 
-  // ── TOTP setup flow (after first OTP login) ─────────────────────────────────
+  // ── TOTP setup ─────────────────────────────────────────────────────────────
   const loadTotpSetup = async () => {
     setLoading(true);
     try {
@@ -187,11 +215,82 @@ export default function Login({ onLogin }: LoginProps) {
         {/* Card */}
         <div className="bg-card border border-border rounded-2xl p-6 shadow-xl shadow-black/20">
 
-          {/* ── Email step ── */}
-          {step === "email" && (
+          {/* ── Credentials step (email + password) ── */}
+          {step === "credentials" && !useOtpMode && (
             <div className="space-y-5">
               <div>
-                <h2 className="text-base font-display font-700 text-foreground">Sign in</h2>
+                <h2 className="text-base font-display font-700 text-foreground flex items-center gap-2">
+                  <Lock size={14} className="text-teal" />Sign in
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Enter your email and password</p>
+              </div>
+
+              {/* Email */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Email address</label>
+                <div className="relative">
+                  <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && document.getElementById("pw-input")?.focus()}
+                    placeholder="you@example.com"
+                    data-testid="input-email"
+                    className="w-full pl-9 pr-4 py-2.5 text-sm bg-secondary/40 border border-border rounded-xl text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal/40 focus:border-teal transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Password */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Password</label>
+                <div className="relative">
+                  <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    id="pw-input"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && loginWithPassword()}
+                    placeholder="••••••••"
+                    data-testid="input-password"
+                    className="w-full pl-9 pr-10 py-2.5 text-sm bg-secondary/40 border border-border rounded-xl text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal/40 focus:border-teal transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(s => !s)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                onClick={loginWithPassword}
+                disabled={loading || !email.trim() || !password}
+                data-testid="button-login"
+                className="w-full py-2.5 rounded-xl bg-teal text-black font-display font-700 text-sm flex items-center justify-center gap-2 hover:bg-teal/90 transition-colors disabled:opacity-50"
+              >
+                {loading ? <Loader2 size={15} className="animate-spin" /> : <><ArrowRight size={15} />Sign in</>}
+              </button>
+
+              {/* OTP fallback */}
+              <button
+                onClick={() => setUseOtpMode(true)}
+                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors text-center"
+              >
+                No password? Sign in with email code →
+              </button>
+            </div>
+          )}
+
+          {/* ── OTP fallback (email code) ── */}
+          {step === "credentials" && useOtpMode && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-base font-display font-700 text-foreground">Sign in with code</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">We'll send a 6-digit code to your email</p>
               </div>
               <div className="space-y-2">
@@ -215,10 +314,16 @@ export default function Login({ onLogin }: LoginProps) {
               >
                 {loading ? <Loader2 size={15} className="animate-spin" /> : <><ArrowRight size={15} />Send code</>}
               </button>
+              <button
+                onClick={() => setUseOtpMode(false)}
+                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                ← Back to password login
+              </button>
             </div>
           )}
 
-          {/* ── OTP step ── */}
+          {/* ── OTP verification step ── */}
           {step === "otp" && (
             <div className="space-y-5">
               <div>
@@ -250,7 +355,7 @@ export default function Login({ onLogin }: LoginProps) {
               )}
 
               <div className="flex items-center justify-between text-xs">
-                <button onClick={() => setStep("email")} className="text-muted-foreground hover:text-foreground transition-colors">
+                <button onClick={() => { setStep("credentials"); setUseOtpMode(true); }} className="text-muted-foreground hover:text-foreground transition-colors">
                   ← Change email
                 </button>
                 {countdown > 0 ? (
@@ -286,10 +391,10 @@ export default function Login({ onLogin }: LoginProps) {
               )}
 
               <button
-                onClick={() => { setStep("email"); setEmail(""); }}
+                onClick={() => { setStep("credentials"); setUseOtpMode(false); }}
                 className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
-                ← Sign in with a different email
+                ← Back to sign in
               </button>
             </div>
           )}

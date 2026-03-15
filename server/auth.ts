@@ -18,6 +18,7 @@ import nodemailer from "nodemailer";
 import QRCode from "qrcode";
 import Database from "better-sqlite3";
 import path from "path";
+import bcrypt from "bcryptjs";
 
 // ─── DB handle (reuse same file as storage) ───────────────────────────────────
 const DB_PATH = process.env.DATABASE_URL?.replace("file:", "") ||
@@ -32,11 +33,12 @@ export function initAuthTables() {
   const db = getDb();
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      email        TEXT NOT NULL UNIQUE,
-      totp_secret  TEXT,
-      totp_enabled INTEGER NOT NULL DEFAULT 0,
-      created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      email         TEXT NOT NULL UNIQUE,
+      password_hash TEXT,
+      totp_secret   TEXT,
+      totp_enabled  INTEGER NOT NULL DEFAULT 0,
+      created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
       last_login_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS otp_sessions (
@@ -49,13 +51,63 @@ export function initAuthTables() {
     );
   `);
 
-  // Seed owner account (a.maher.bina@gmail.com) if no users exist
+  // Add password_hash column to existing deployments that don't have it yet
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN password_hash TEXT");
+    console.log("[Auth] Migrated: added password_hash column");
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Seed owner account if no users exist
   const count = (db.prepare("SELECT COUNT(*) as n FROM users").get() as any).n;
   if (count === 0) {
     db.prepare("INSERT INTO users (email) VALUES (?)").run("a.maher.bina@gmail.com");
     console.log("[Auth] Owner account seeded: a.maher.bina@gmail.com");
   }
   db.close();
+}
+
+// ─── Password auth ────────────────────────────────────────────────────────────
+
+export async function setUserPassword(
+  email: string,
+  plainPassword: string
+): Promise<{ ok: boolean; error?: string }> {
+  const db = getDb();
+  try {
+    const user = db.prepare("SELECT id FROM users WHERE email = ?").get(email) as any;
+    if (!user) return { ok: false, error: "User not found" };
+    const hash = await bcrypt.hash(plainPassword, 12);
+    db.prepare("UPDATE users SET password_hash = ? WHERE email = ?").run(hash, email);
+    console.log(`[Auth] Password set for ${email}`);
+    return { ok: true };
+  } finally {
+    db.close();
+  }
+}
+
+export async function verifyPassword(
+  email: string,
+  plainPassword: string
+): Promise<{ ok: boolean; userId?: number; totpEnabled?: boolean; error?: string }> {
+  const db = getDb();
+  try {
+    const user = db.prepare(
+      "SELECT id, password_hash, totp_enabled FROM users WHERE email = ?"
+    ).get(email) as any;
+    if (!user) return { ok: false, error: "Email not authorised." };
+    if (!user.password_hash) return { ok: false, error: "No password set. Use email OTP to log in." };
+
+    const match = await bcrypt.compare(plainPassword, user.password_hash);
+    if (!match) return { ok: false, error: "Incorrect password." };
+
+    const now = Math.floor(Date.now() / 1000);
+    db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(now, user.id);
+    return { ok: true, userId: user.id, totpEnabled: !!user.totp_enabled };
+  } finally {
+    db.close();
+  }
 }
 
 // ─── Email transporter ────────────────────────────────────────────────────────

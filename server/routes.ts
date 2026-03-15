@@ -10,7 +10,8 @@ import { fetchOrderStatus } from "./alpacaOrders";
 import { fetchWalletPositions } from "./polymarketClient";
 import {
   sendOtpEmail, verifyOtp, verifyTotp,
-  generateTotpSetup, enableTotp, getUserById, requireAuth
+  generateTotpSetup, enableTotp, getUserById, requireAuth,
+  setUserPassword, verifyPassword,
 } from "./auth";
 import { z } from "zod";
 import { insertCopiedWalletSchema } from "@shared/schema";
@@ -93,6 +94,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const result = enableTotp(userId, String(token));
     if (!result.ok) return res.status(400).json({ error: result.error });
     res.json({ ok: true, message: "TOTP enabled — use authenticator app to log in next time" });
+  });
+
+  // Password login — POST /api/auth/login { email, password }
+  app.post("/api/auth/login", async (req, res) => {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: "Email and password required" });
+    const result = await verifyPassword(email.toLowerCase().trim(), String(password));
+    if (!result.ok) return res.status(401).json({ error: result.error });
+    if (result.totpEnabled) {
+      // Has TOTP — return partial flag, don't create session yet
+      return res.json({ ok: true, totpRequired: true, email: email.toLowerCase().trim() });
+    }
+    (req.session as any).userId = result.userId;
+    req.session.save(() => {
+      const user = getUserById(result.userId!);
+      res.json({ ok: true, email: user.email, totpEnabled: false });
+    });
+  });
+
+  // Set/change password — POST /api/auth/set-password { email, password }
+  // Must be called while authenticated (owner only for now)
+  app.post("/api/auth/set-password", async (req, res) => {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: "Email and password required" });
+    if (String(password).length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+    const result = await setUserPassword(email.toLowerCase().trim(), String(password));
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ ok: true, message: "Password updated" });
   });
 
   // ─── Bot Settings ─────────────────────────────────────────────────────────
