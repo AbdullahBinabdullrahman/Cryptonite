@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { insertBotSettingsSchema, insertTradeSchema } from "@shared/schema";
 import { startBotEngine, stopBotEngine } from "./botEngine";
 import { startCopyEngine, syncWalletNow } from "./copyEngine";
+import { startClobStrategy, stopClobStrategy, getClobSnapshot } from "./clobStrategy";
 import { fetchAlpacaAccount } from "./alpacaClient";
 import { fetchOrderStatus } from "./alpacaOrders";
 import { fetchWalletPositions } from "./polymarketClient";
@@ -13,6 +14,7 @@ import { insertCopiedWalletSchema } from "@shared/schema";
 // Start engines on server boot
 startBotEngine();
 startCopyEngine();
+startClobStrategy();
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
 
@@ -86,6 +88,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ─── Bot Control ──────────────────────────────────────────────────────────
+  // ─── CLOB Strategy ────────────────────────────────────────────────────────
+
+  app.get("/api/clob/markets", async (_req, res) => {
+    try {
+      const snapshot = await getClobSnapshot();
+      res.json(snapshot);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/clob/start", async (_req, res) => {
+    startClobStrategy();
+    res.json({ ok: true, message: "CLOB strategy started" });
+  });
+
+  app.post("/api/clob/stop", async (_req, res) => {
+    stopClobStrategy();
+    res.json({ ok: true, message: "CLOB strategy stopped" });
+  });
+
+  // ─── Bot Controls ─────────────────────────────────────────────────────────
+
   app.post("/api/bot/start", async (_req, res) => {
     const settings = await storage.getBotSettings();
     if (!settings.alpacaApiKey) {
@@ -331,6 +356,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       { id: "sol-5pct-day",  name: "Will SOL gain 5%+ today?",             yesOdds: 0.18, noOdds: 0.82, volume: 9000,   timeLeft: "6h",     liquidity: 9000,   category: "sol" },
     ];
     res.json(markets);
+  });
+
+  // Live Polymarket markets from CLOB
+  app.get("/api/markets/live", async (_req, res) => {
+    try {
+      const snapshot = await getClobSnapshot();
+      res.json(snapshot.markets);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ─── Copy Trading ───────────────────────────────────────────────────────

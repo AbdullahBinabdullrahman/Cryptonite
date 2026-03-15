@@ -1,0 +1,499 @@
+/**
+ * CLOB Strategy Engine v2 — Bayesian + EV Filter + Kelly Sizing
+ *
+ * Based on the viral ARB ENGINE strategy:
+ *   1. Bayesian Model:   P(H|D) = P(D|H)·P(H)/P(D)  — true prob from price/volume
+ *   2. EV Filter:        EV_net  = q - p - c          — only trade if EV > threshold
+ *   3. Stochastic Quote: r = s · qGamma(σ²/(T-t))    — limit order placement
+ *   4. Kelly Sizing:     f = edge / odds              — bet fraction
+ *
+ * Every 10 seconds:
+ *   - Fetch BTC/ETH/SOL prices from CoinGecko/Kraken
+ *   - Update Bayesian posterior for each asset
+ *   - Scan live 5-min Polymarket "Up or Down" markets
+ *   - For each market, compute EV_net after 2% fees
+ *   - Place CLOB limit order if EV_net > MIN_EV (0.005)
+ *   - Size with Kelly criterion
+ */
+
+import { storage } from "./storage";
+import { placeClobOrder } from "./polymarketClient";
+
+const GAMMA_API   = "https://gamma-api.polymarket.com";
+const CLOB_API    = "https://clob.polymarket.com";
+const POLY_FEE    = 0.02;   // 2% Polymarket fee
+const MIN_EV      = 0.005;  // minimum net EV (0.5%) — matches original
+const MAX_KELLY   = 0.05;   // cap Kelly at 5% of balance per trade
+const MIN_BET     = 1.0;    // $1 minimum (like original strategy)
+const MAX_BET     = 10.0;   // $10 maximum per trade
+const TICK_MS     = 10000;  // 10 seconds
+const MAX_PER_DAY = 500;    // up to 500 CLOB trades/day
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface PriceTick { price: number; volume?: number; ts: number }
+
+interface BayesState {
+  prior: number;       // P(H) — prob BTC goes up this 5-min window
+  posterior: number;   // P(H|D) — updated after new data
+  variance: number;    // σ² — rolling price variance
+  ticks: PriceTick[];  // last 60 ticks (~10 min history)
+}
+
+interface ClobMarket {
+  question: string;
+  conditionId: string;
+  tokenIdYes: string;
+  tokenIdNo: string;
+  yesPrice: number;
+  noPrice: number;
+  liquidity: number;
+  endDate: string;
+  asset: string;
+  timeRemaining: number; // seconds until resolution
+}
+
+interface EdgeOpp {
+  market: ClobMarket;
+  prior: number;
+  posterior: number;
+  evNet: number;
+  side: "YES" | "NO";
+  tokenId: string;
+  limitPrice: number;   // stochastic reservation price
+  kellyFraction: number;
+  betSize: number;
+}
+
+// ─── Bayesian state per asset ─────────────────────────────────────────────────
+
+const bayesState: Record<string, BayesState> = {};
+
+function getOrInitBayes(asset: string): BayesState {
+  if (!bayesState[asset]) {
+    bayesState[asset] = { prior: 0.5, posterior: 0.5, variance: 0.0001, ticks: [] };
+  }
+  return bayesState[asset];
+}
+
+/**
+ * Bayesian update: P(H|D) = P(D|H)·P(H) / P(D)
+ *
+ * H = "price will go UP in next 5 min"
+ * D = observed price change in last tick
+ *
+ * Likelihood P(D|H):
+ *   If H is true (going up), positive price changes are more likely.
+ *   We model P(D|H=up)   ~ N(+μ, σ²) where μ = mean positive move
+ *         P(D|H=down) ~ N(-μ, σ²)
+ *
+ * Using log-likelihood ratio for stability.
+ */
+function updateBayes(state: BayesState, newPrice: number): void {
+  const now = Date.now();
+  state.ticks.push({ price: newPrice, ts: now });
+
+  // Keep last 10 minutes of ticks
+  state.ticks = state.ticks.filter(t => now - t.ts < 10 * 60 * 1000);
+
+  if (state.ticks.length < 3) return;
+
+  const prices = state.ticks.map(t => t.price);
+  const n = prices.length;
+
+  // Compute rolling variance σ²
+  const returns = prices.slice(1).map((p, i) => (p - prices[i]) / prices[i]);
+  const meanReturn = returns.reduce((s, r) => s + r, 0) / returns.length;
+  state.variance = returns.reduce((s, r) => s + (r - meanReturn) ** 2, 0) / returns.length;
+  state.variance = Math.max(state.variance, 1e-8); // avoid division by zero
+
+  // Observed data: last 5-tick price change
+  const recent = prices.slice(-5);
+  const delta = (recent[recent.length - 1] - recent[0]) / recent[0];
+
+  // Expected positive move per tick under H=up (use historical mean of positive returns)
+  const posReturns = returns.filter(r => r > 0);
+  const mu = posReturns.length > 0
+    ? posReturns.reduce((s, r) => s + r, 0) / posReturns.length
+    : 0.0005;
+
+  // Log-likelihood ratio: ln[P(D|up) / P(D|down)]
+  // Under N(+μ, σ²): log P(D|up)   = -(delta-mu)²/(2σ²)
+  // Under N(-μ, σ²): log P(D|down) = -(delta+mu)²/(2σ²)
+  const llr = ((delta + mu) ** 2 - (delta - mu) ** 2) / (2 * state.variance);
+  const likelihoodRatio = Math.exp(Math.min(5, Math.max(-5, llr))); // clamp
+
+  // Bayes update: P(H|D) = P(D|H)·P(H) / [P(D|H)·P(H) + P(D|¬H)·P(¬H)]
+  const prior = state.prior;
+  const posterior = (likelihoodRatio * prior) / (likelihoodRatio * prior + (1 - prior));
+
+  state.posterior = Math.max(0.05, Math.min(0.95, posterior));
+
+  // Slow-decay prior toward posterior (0.9 momentum)
+  state.prior = 0.9 * prior + 0.1 * state.posterior;
+}
+
+// ─── Stochastic reservation price (Avellaneda-Stoikov) ───────────────────────
+// r = s · qGamma(σ² / (T - t))
+// We use the gamma quantile approximation for limit order placement.
+function reservationPrice(midPrice: number, variance: number, timeRemaining: number): number {
+  if (timeRemaining <= 0) return midPrice;
+  const gamma = 0.36; // risk aversion (from screenshot: gamma=0.36)
+  const adjustment = gamma * variance / timeRemaining * 300; // normalize to minutes
+  // Slightly inside the mid to get filled
+  return Math.max(0.01, Math.min(0.99, midPrice - adjustment));
+}
+
+// ─── Price fetching ───────────────────────────────────────────────────────────
+
+const priceCache: { data: Record<string, number>; ts: number } = { data: {}, ts: 0 };
+
+async function fetchPrices(): Promise<Record<string, number>> {
+  if (Date.now() - priceCache.ts < 8000) return priceCache.data;
+  try {
+    const res = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,ripple,dogecoin&vs_currencies=usd",
+      { signal: AbortSignal.timeout(6000) }
+    );
+    if (!res.ok) throw new Error("CoinGecko failed");
+    const d = await res.json() as Record<string, { usd: number }>;
+    priceCache.data = {
+      BTC: d.bitcoin?.usd ?? 0,
+      ETH: d.ethereum?.usd ?? 0,
+      SOL: d.solana?.usd ?? 0,
+      XRP: d.ripple?.usd ?? 0,
+      DOGE: d.dogecoin?.usd ?? 0,
+    };
+    priceCache.ts = Date.now();
+    return priceCache.data;
+  } catch {
+    // Kraken fallback
+    try {
+      const res = await fetch("https://api.kraken.com/0/public/Ticker?pair=XBTUSD,ETHUSD,SOLUSD", {
+        signal: AbortSignal.timeout(5000),
+      });
+      const d = await res.json() as any;
+      priceCache.data = {
+        BTC: parseFloat(d.result?.XXBTZUSD?.c?.[0] ?? "0"),
+        ETH: parseFloat(d.result?.XETHZUSD?.c?.[0] ?? "0"),
+        SOL: parseFloat(d.result?.SOLUSD?.c?.[0]   ?? "0"),
+        XRP: 0, DOGE: 0,
+      };
+      priceCache.ts = Date.now();
+    } catch {}
+    return priceCache.data;
+  }
+}
+
+// ─── Fetch live up/down markets ───────────────────────────────────────────────
+
+let marketCache: { data: ClobMarket[]; ts: number } = { data: [], ts: 0 };
+
+async function fetchUpDownMarkets(): Promise<ClobMarket[]> {
+  // Refresh every 60s (markets don't change often)
+  if (Date.now() - marketCache.ts < 60000 && marketCache.data.length > 0) {
+    return marketCache.data;
+  }
+  try {
+    const res = await fetch(
+      `${GAMMA_API}/markets?active=true&closed=false&limit=200&order=startDate&ascending=false`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (!res.ok) return marketCache.data;
+    const raw = await res.json() as any[];
+    if (!Array.isArray(raw)) return marketCache.data;
+
+    const now = Date.now();
+    const markets: ClobMarket[] = [];
+
+    for (const m of raw) {
+      const q: string = (m.question || m.title || "").toLowerCase();
+      const liq = parseFloat(m.liquidity ?? "0");
+      if (!q.includes("up or down")) continue;
+      if (liq < 500) continue;
+
+      let asset = "";
+      if (q.includes("bitcoin")) asset = "BTC";
+      else if (q.includes("ethereum")) asset = "ETH";
+      else if (q.includes("solana")) asset = "SOL";
+      else if (q.includes("xrp")) asset = "XRP";
+      else if (q.includes("dogecoin")) asset = "DOGE";
+      else continue;
+
+      const tokenIds: string[] = m.clobTokenIds ?? [];
+      if (tokenIds.length < 2) continue;
+
+      const endDate = m.endDate ? new Date(m.endDate).getTime() : now + 300000;
+      const timeRemaining = Math.max(0, (endDate - now) / 1000);
+
+      // Fetch Yes price from CLOB
+      let yesPrice = 0.5;
+      try {
+        const pr = await fetch(`${CLOB_API}/price?token_id=${tokenIds[0]}&side=buy`, {
+          signal: AbortSignal.timeout(4000),
+        });
+        if (pr.ok) {
+          const pd = await pr.json() as { price?: string };
+          yesPrice = parseFloat(pd.price ?? "0.5");
+          if (isNaN(yesPrice) || yesPrice <= 0 || yesPrice >= 1) yesPrice = 0.5;
+        }
+      } catch {}
+
+      markets.push({
+        question: m.question || m.title,
+        conditionId: m.conditionId || "",
+        tokenIdYes: tokenIds[0],
+        tokenIdNo: tokenIds[1],
+        yesPrice,
+        noPrice: 1 - yesPrice,
+        liquidity: liq,
+        endDate: m.endDate || "",
+        asset,
+        timeRemaining,
+      });
+    }
+
+    marketCache = { data: markets, ts: Date.now() };
+    return markets;
+  } catch (err) {
+    console.warn("[CLOBv2] fetchUpDownMarkets error:", err);
+    return marketCache.data;
+  }
+}
+
+// ─── EV calculation ───────────────────────────────────────────────────────────
+/**
+ * EV_net = q - p - c
+ *   q = model price (Bayesian posterior for YES, or 1-posterior for NO)
+ *   p = market price for the token we're buying
+ *   c = fees (2% of p) + slippage estimate (0.5%)
+ */
+function calcEV(modelProb: number, marketPrice: number): number {
+  const c = POLY_FEE * marketPrice + 0.005; // fee + slippage
+  return modelProb - marketPrice - c;
+}
+
+// ─── Kelly criterion ──────────────────────────────────────────────────────────
+// f* = (b·p - q) / b  where b = odds (payout per $1 bet), p = win prob, q = 1-p
+function kellyFraction(winProb: number, limitPrice: number): number {
+  if (limitPrice <= 0 || limitPrice >= 1) return 0;
+  const b = (1 - limitPrice) / limitPrice; // net odds
+  const q = 1 - winProb;
+  const f = (b * winProb - q) / b;
+  return Math.max(0, Math.min(MAX_KELLY, f));
+}
+
+// ─── Find edge opportunities ──────────────────────────────────────────────────
+
+function findEdgeOpps(markets: ClobMarket[], bayesMap: Record<string, BayesState>): EdgeOpp[] {
+  const opps: EdgeOpp[] = [];
+
+  for (const mkt of markets) {
+    const state = bayesMap[mkt.asset];
+    if (!state || state.ticks.length < 3) continue;
+
+    const posterior = state.posterior; // P(BTC goes up)
+    const variance  = state.variance;
+
+    // ── YES side: model says UP more than market thinks
+    const evYes = calcEV(posterior, mkt.yesPrice);
+    if (evYes > MIN_EV && mkt.timeRemaining > 30) {
+      const rPrice = reservationPrice(mkt.yesPrice, variance, mkt.timeRemaining);
+      const kf     = kellyFraction(posterior, rPrice);
+      if (kf > 0) {
+        opps.push({
+          market: mkt,
+          prior: state.prior,
+          posterior,
+          evNet: evYes,
+          side: "YES",
+          tokenId: mkt.tokenIdYes,
+          limitPrice: rPrice,
+          kellyFraction: kf,
+          betSize: 0, // filled later
+        });
+      }
+    }
+
+    // ── NO side: model says DOWN, market underprices NO
+    const noModelProb = 1 - posterior;
+    const evNo = calcEV(noModelProb, mkt.noPrice);
+    if (evNo > MIN_EV && mkt.timeRemaining > 30) {
+      const rPrice = reservationPrice(mkt.noPrice, variance, mkt.timeRemaining);
+      const kf     = kellyFraction(noModelProb, rPrice);
+      if (kf > 0) {
+        opps.push({
+          market: mkt,
+          prior: state.prior,
+          posterior,
+          evNet: evNo,
+          side: "NO",
+          tokenId: mkt.tokenIdNo,
+          limitPrice: rPrice,
+          kellyFraction: kf,
+          betSize: 0,
+        });
+      }
+    }
+  }
+
+  // Sort by EV descending
+  opps.sort((a, b) => b.evNet - a.evNet);
+  return opps;
+}
+
+// ─── Place order ──────────────────────────────────────────────────────────────
+
+async function placeBet(opp: EdgeOpp, balance: number, settings: any): Promise<boolean> {
+  const pk  = settings.polyPrivateKey    || process.env.POLY_PRIVATE_KEY    || "019cec4d-35f6-7db6-9702-a189b1a21bb9";
+  const fdr = settings.polyFunderAddress || process.env.POLY_FUNDER_ADDRESS || "0x4e2355789ae74089cdeea5d091e43567447e6093";
+
+  // Kelly-sized bet, clamped between MIN_BET and MAX_BET
+  const rawBet = balance * opp.kellyFraction;
+  opp.betSize  = Math.min(MAX_BET, Math.max(MIN_BET, rawBet));
+  const shares = opp.betSize / opp.limitPrice;
+
+  // Record trade
+  const trade = await storage.createTrade({
+    market:        opp.market.question,
+    marketId:      opp.market.conditionId,
+    direction:     opp.side,
+    betSize:       opp.betSize,
+    entryOdds:     opp.limitPrice,
+    btcMomentum:   opp.posterior - 0.5, // signed momentum indicator
+    edgeDetected:  Math.round(opp.evNet * 10000) / 100,
+    status:        "open",
+    pnl:           0,
+    resolvedAt:    null,
+  });
+
+  // Place CLOB limit order
+  const result = await placeClobOrder({
+    privateKey:    pk,
+    funderAddress: fdr,
+    tokenId:       opp.tokenId,
+    side:          "BUY",
+    size:          Math.round(shares * 100) / 100,
+    price:         opp.limitPrice,
+    marketId:      opp.market.conditionId,
+  });
+
+  const status = result.status === "simulated" ? "clob:simulated" : "clob:placed";
+  await storage.updateTradeAlpacaOrder(trade.id, result.orderId ?? `clob-${Date.now()}`, status);
+
+  console.log(
+    `[CLOBv2] ${opp.market.asset} ${opp.side} | ` +
+    `prior=${(opp.prior*100).toFixed(1)}% → post=${(opp.posterior*100).toFixed(1)}% | ` +
+    `EV=${(opp.evNet*100).toFixed(2)}% | Kelly=${(opp.kellyFraction*100).toFixed(2)}% | ` +
+    `$${opp.betSize.toFixed(2)} @ ${opp.limitPrice.toFixed(3)} | ${status}`
+  );
+  return result.ok;
+}
+
+// ─── Main loop ────────────────────────────────────────────────────────────────
+
+let clobInterval: ReturnType<typeof setInterval> | null = null;
+
+export function startClobStrategy() {
+  if (clobInterval) return;
+  console.log("[CLOBv2] Starting — Bayesian edge detection on 5-min Up/Down markets");
+
+  clobInterval = setInterval(async () => {
+    try {
+      const settings = await storage.getBotSettings();
+      if (!settings.isRunning) return;
+
+      const todayCount = await storage.getTodayTradeCount();
+      if (todayCount >= MAX_PER_DAY) return;
+
+      const todayPnl = await storage.getTodayPnl();
+      const maxDailyLoss = settings.totalBalance * ((settings.dailyStopLossPct ?? 5) / 100);
+      if (todayPnl < -maxDailyLoss) return;
+
+      // 1. Fetch prices and update Bayesian state
+      const prices = await fetchPrices();
+      for (const [sym, price] of Object.entries(prices)) {
+        if (price > 0) {
+          const state = getOrInitBayes(sym);
+          updateBayes(state, price);
+        }
+      }
+
+      // 2. Fetch live markets
+      const markets = await fetchUpDownMarkets();
+      if (!markets.length) return;
+
+      // 3. Find edge opportunities
+      const opps = findEdgeOpps(markets, bayesState);
+      if (!opps.length) return;
+
+      console.log(`[CLOBv2] ${opps.length} edge opps | top EV=${(opps[0].evNet*100).toFixed(2)}%`);
+
+      // 4. Place top opportunities (max 5 per tick)
+      const limit = Math.min(5, opps.length, MAX_PER_DAY - todayCount);
+      for (let i = 0; i < limit; i++) {
+        await placeBet(opps[i], settings.totalBalance, settings);
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+    } catch (err) {
+      console.error("[CLOBv2] tick error:", err);
+    }
+  }, TICK_MS);
+}
+
+export function stopClobStrategy() {
+  if (clobInterval) { clearInterval(clobInterval); clobInterval = null; }
+  console.log("[CLOBv2] Stopped");
+}
+
+// ─── Snapshot for UI ──────────────────────────────────────────────────────────
+
+export async function getClobSnapshot() {
+  const markets = await fetchUpDownMarkets();
+  const prices  = await fetchPrices();
+
+  // Refresh Bayesian state with latest prices
+  for (const [sym, price] of Object.entries(prices)) {
+    if (price > 0) {
+      const state = getOrInitBayes(sym);
+      updateBayes(state, price);
+    }
+  }
+
+  const rows = markets.slice(0, 30).map(m => {
+    const state = bayesState[m.asset];
+    const posterior = state?.posterior ?? 0.5;
+    const variance  = state?.variance  ?? 0.0001;
+    const evYes = calcEV(posterior, m.yesPrice);
+    const evNo  = calcEV(1 - posterior, m.noPrice);
+    const bestEv   = Math.max(evYes, evNo);
+    const bestSide = evYes >= evNo ? "YES" : "NO";
+    return {
+      question:   m.question,
+      asset:      m.asset,
+      yesPrice:   Math.round(m.yesPrice * 1000) / 1000,
+      noPrice:    Math.round(m.noPrice  * 1000) / 1000,
+      posterior:  Math.round(posterior  * 1000) / 1000,
+      evNet:      Math.round(bestEv * 10000) / 100,
+      side:       bestSide,
+      liquidity:  Math.round(m.liquidity),
+      hasEdge:    bestEv > MIN_EV,
+      timeLeft:   Math.round(m.timeRemaining),
+    };
+  });
+
+  return {
+    markets: rows,
+    bayesState: Object.fromEntries(
+      Object.entries(bayesState).map(([k, v]) => [k, {
+        prior:     Math.round(v.prior     * 1000) / 1000,
+        posterior: Math.round(v.posterior * 1000) / 1000,
+        variance:  Math.round(v.variance  * 1e8)  / 1e8,
+        ticks:     v.ticks.length,
+      }])
+    ),
+    prices,
+    lastUpdated: new Date().toISOString(),
+  };
+}
