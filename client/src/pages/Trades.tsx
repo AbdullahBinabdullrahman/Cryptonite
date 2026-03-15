@@ -237,7 +237,7 @@ export default function Trades() {
       </div>
 
       {/* Summary stats */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: "Total Trades", value: tradeList.length, icon: BarChart3, color: "text-foreground" },
           { label: "Win Rate", value: `${winRate}%`, icon: Target, color: "text-up" },

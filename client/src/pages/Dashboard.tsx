@@ -154,7 +154,7 @@ function BotHealthPanel({ d, alpaca }: { d: any; alpaca: any }) {
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
       {metrics.map(({ label, value, color, icon }) => (
         <div key={label} className="bg-secondary/30 rounded-xl p-3 border border-border flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-lg bg-secondary flex items-center justify-center flex-shrink-0">
@@ -348,11 +348,11 @@ export default function Dashboard() {
 
       {/* Stats grid */}
       {isLoading ? (
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
         </div>
       ) : (
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard
             label="Portfolio"
             value={`$${displayBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
@@ -390,9 +390,9 @@ export default function Dashboard() {
       )}
 
       {/* PNL chart + edge feed */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* PNL Chart */}
-        <Card className="xl:col-span-2 bg-card border-border">
+        <Card className="lg:col-span-2 bg-card border-border">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-sm font-display font-700">Portfolio Performance</CardTitle>
