@@ -181,12 +181,16 @@ async function buildSignedOrder(wallet: Wallet, args: OrderArgs, useNegRisk = fa
     verifyingContract: exchange,
   };
 
+  // Sanitize tokenId: strip JSON artifacts like quotes/brackets in case
+  // clobTokenIds was not parsed upstream (defensive guard)
+  const rawTokenIdStr = String(args.tokenId).trim().replace(/["\[\]]/g, "");
+
   const orderData = {
     salt,
     maker:         args.maker,
     signer:        args.signer,
     taker:         "0x0000000000000000000000000000000000000000",
-    tokenId:       BigInt(args.tokenId),
+    tokenId:       BigInt(rawTokenIdStr),
     makerAmount:   args.makerAmount,
     takerAmount:   args.takerAmount,
     expiration:    args.expiration,

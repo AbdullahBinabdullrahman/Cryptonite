@@ -220,7 +220,12 @@ async function fetchUpDownMarkets(): Promise<ClobMarket[]> {
       else if (q.includes("dogecoin")) asset = "DOGE";
       else continue;
 
-      const tokenIds: string[] = m.clobTokenIds ?? [];
+      // clobTokenIds from Gamma API comes as a JSON string e.g. '["123","456"]'
+      // We must parse it before treating it as an array.
+      const rawTokenIds = m.clobTokenIds ?? "[]";
+      const tokenIds: string[] = typeof rawTokenIds === "string"
+        ? (() => { try { return JSON.parse(rawTokenIds); } catch { return []; } })()
+        : (Array.isArray(rawTokenIds) ? rawTokenIds : []);
       if (tokenIds.length < 2) continue;
 
       const endDate = m.endDate ? new Date(m.endDate).getTime() : now + 300000;
