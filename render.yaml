@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: polybot
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: NODE_ENV=production node dist/index.cjs
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: POLY_PRIVATE_KEY
+        sync: false
+      - key: POLY_FUNDER_ADDRESS
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_API_SECRET
+        sync: false
+    healthCheckPath: /api/dashboard
