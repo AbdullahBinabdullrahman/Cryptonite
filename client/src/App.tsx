@@ -9,6 +9,7 @@ import Trades from "@/pages/Trades";
 import CopyTrade from "@/pages/CopyTrade";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/not-found";
+import Login from "@/pages/Login";
 import PerplexityAttribution from "@/components/PerplexityAttribution";
 import { LiveTicker } from "@/components/LiveTicker";
 import { useQuery } from "@tanstack/react-query";
@@ -150,8 +151,8 @@ function MobileBottomNav() {
   );
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
-function App() {
+// ── AppShell (main UI) ───────────────────────────────────────────────────────────────────────
+function AppShell() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -202,6 +203,43 @@ function App() {
         </Router>
         <Toaster />
       </div>
+    </QueryClientProvider>
+  );
+}
+
+// ── Auth-guarded root ────────────────────────────────────────────────────────
+function App() {
+  const [authedEmail, setAuthedEmail] = useState<string | null>(null);
+
+  const { data: authData, isLoading } = useQuery({
+    queryKey: ["/api/auth/me"],
+    queryFn: () => apiRequest("GET", "/api/auth/me").then(r => r.json()),
+    retry: false,
+    staleTime: 60000,
+  });
+
+  if (isLoading) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-teal/30 border-t-teal rounded-full animate-spin" />
+        </div>
+      </QueryClientProvider>
+    );
+  }
+
+  if (!authData?.loggedIn && !authedEmail) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <Login onLogin={e => setAuthedEmail(e)} />
+        <Toaster />
+      </QueryClientProvider>
+    );
+  }
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppShell />
     </QueryClientProvider>
   );
 }

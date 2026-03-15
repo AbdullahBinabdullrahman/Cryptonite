@@ -8,6 +8,10 @@ import { startClobStrategy, stopClobStrategy, getClobSnapshot } from "./clobStra
 import { fetchAlpacaAccount } from "./alpacaClient";
 import { fetchOrderStatus } from "./alpacaOrders";
 import { fetchWalletPositions } from "./polymarketClient";
+import {
+  sendOtpEmail, verifyOtp, verifyTotp,
+  generateTotpSetup, enableTotp, getUserById, requireAuth
+} from "./auth";
 import { z } from "zod";
 import { insertCopiedWalletSchema } from "@shared/schema";
 
@@ -17,6 +21,79 @@ startCopyEngine();
 startClobStrategy();
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+
+  // ─── Auth Routes ──────────────────────────────────────────────────────────
+
+  // Check session
+  app.get("/api/auth/me", (req, res) => {
+    const userId = (req.session as any)?.userId;
+    if (!userId) return res.status(401).json({ loggedIn: false });
+    const user = getUserById(userId);
+    if (!user) return res.status(401).json({ loggedIn: false });
+    res.json({ loggedIn: true, email: user.email, totpEnabled: !!user.totp_enabled });
+  });
+
+  // Send email OTP
+  app.post("/api/auth/send-otp", async (req, res) => {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ error: "Email required" });
+    const result = await sendOtpEmail(email.toLowerCase().trim());
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    // In dev mode, return the preview URL so user can see the code
+    res.json({ ok: true, previewUrl: result.previewUrl || null });
+  });
+
+  // Verify OTP or TOTP token
+  app.post("/api/auth/verify", (req, res) => {
+    const { email, code, totpToken } = req.body || {};
+    if (!email) return res.status(400).json({ error: "Email required" });
+
+    let result: { ok: boolean; userId?: number; error?: string };
+
+    if (totpToken) {
+      // TOTP path (Google Authenticator)
+      result = verifyTotp(email.toLowerCase().trim(), String(totpToken));
+    } else if (code) {
+      // Email OTP path
+      result = verifyOtp(email.toLowerCase().trim(), String(code));
+    } else {
+      return res.status(400).json({ error: "code or totpToken required" });
+    }
+
+    if (!result.ok) return res.status(401).json({ error: result.error });
+
+    // Set session
+    (req.session as any).userId = result.userId;
+    req.session.save(() => {
+      const user = getUserById(result.userId!);
+      res.json({ ok: true, email: user.email, totpEnabled: !!user.totp_enabled });
+    });
+  });
+
+  // Logout
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy(() => res.json({ ok: true }));
+  });
+
+  // TOTP setup — get QR code
+  app.get("/api/auth/totp-setup", async (req, res) => {
+    const userId = (req.session as any)?.userId;
+    if (!userId) return res.status(401).json({ error: "Not logged in" });
+    const result = await generateTotpSetup(userId);
+    if (!result.ok) return res.status(500).json({ error: result.error });
+    res.json({ secret: result.secret, qrDataUrl: result.qrDataUrl });
+  });
+
+  // TOTP enable — verify first token
+  app.post("/api/auth/totp-enable", (req, res) => {
+    const userId = (req.session as any)?.userId;
+    if (!userId) return res.status(401).json({ error: "Not logged in" });
+    const { token } = req.body || {};
+    if (!token) return res.status(400).json({ error: "Token required" });
+    const result = enableTotp(userId, String(token));
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ ok: true, message: "TOTP enabled — use authenticator app to log in next time" });
+  });
 
   // ─── Bot Settings ─────────────────────────────────────────────────────────
   app.get("/api/settings", async (_req, res) => {

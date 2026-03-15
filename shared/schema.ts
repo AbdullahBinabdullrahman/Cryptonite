@@ -129,3 +129,26 @@ export type CopiedWallet = typeof copiedWallets.$inferSelect;
 export type InsertCopiedWallet = z.infer<typeof insertCopiedWalletSchema>;
 export type CopyTrade = typeof copyTrades.$inferSelect;
 export type InsertCopyTrade = z.infer<typeof insertCopyTradeSchema>;
+
+// ─── Auth: users table ────────────────────────────────────────────────────────
+export const users = sqliteTable("users", {
+  id:           integer("id").primaryKey({ autoIncrement: true }),
+  email:        text("email").notNull().unique(),
+  totpSecret:   text("totp_secret"),                          // null = not set up yet
+  totpEnabled:  integer("totp_enabled", { mode: "boolean" }).notNull().default(false),
+  createdAt:    integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  lastLoginAt:  integer("last_login_at", { mode: "timestamp" }),
+});
+
+// ─── Auth: email OTP sessions ─────────────────────────────────────────────────
+export const otpSessions = sqliteTable("otp_sessions", {
+  id:        integer("id").primaryKey({ autoIncrement: true }),
+  email:     text("email").notNull(),
+  code:      text("code").notNull(),             // 6-digit code
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  used:      integer("used", { mode: "boolean" }).notNull().default(false),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export type User = typeof users.$inferSelect;
+export type OtpSession = typeof otpSessions.$inferSelect;
