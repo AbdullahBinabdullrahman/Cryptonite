@@ -156,8 +156,7 @@ function AppShell() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground">
         <Router hook={useHashLocation}>
 
           {/* ── Desktop sidebar (hidden on mobile) ── */}
@@ -203,12 +202,11 @@ function AppShell() {
         </Router>
         <Toaster />
       </div>
-    </QueryClientProvider>
   );
 }
 
-// ── Auth-guarded root ────────────────────────────────────────────────────────
-function App() {
+// ── Auth gate (needs QueryClientProvider as parent) ──────────────────────────
+function AuthGate() {
   const [authedEmail, setAuthedEmail] = useState<string | null>(null);
 
   const { data: authData, isLoading } = useQuery({
@@ -220,26 +218,29 @@ function App() {
 
   if (isLoading) {
     return (
-      <QueryClientProvider client={queryClient}>
-        <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="w-8 h-8 border-2 border-teal/30 border-t-teal rounded-full animate-spin" />
-        </div>
-      </QueryClientProvider>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-teal/30 border-t-teal rounded-full animate-spin" />
+      </div>
     );
   }
 
   if (!authData?.loggedIn && !authedEmail) {
     return (
-      <QueryClientProvider client={queryClient}>
+      <>
         <Login onLogin={e => setAuthedEmail(e)} />
         <Toaster />
-      </QueryClientProvider>
+      </>
     );
   }
 
+  return <AppShell />;
+}
+
+// ── Root — QueryClientProvider wraps everything ───────────────────────────────
+function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppShell />
+      <AuthGate />
     </QueryClientProvider>
   );
 }
