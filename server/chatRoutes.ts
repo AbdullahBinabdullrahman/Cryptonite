@@ -6,6 +6,7 @@
 
 import type { Express, Request, Response } from "express";
 import { storage } from "./storage";
+import { fetchAlpacaAccount, fetchAlpacaPositions } from "./alpacaClient";
 
 const GROK_RESPONSES_API = "https://api.x.ai/v1/responses";
 const GROK_KEY = process.env.GROK_API_KEY || "";
@@ -20,52 +21,158 @@ function getSessionId(req: Request): string {
 async function buildSystemPrompt(): Promise<string> {
   try {
     const settings = await storage.getBotSettings();
-    const trades = await storage.getRecentTrades(20);
     const s: any = settings;
 
-    const wins = trades.filter((t: any) => (t.pnl || 0) > 0).length;
-    const total = trades.length;
-    const todayPnl = trades
-      .filter((t: any) => {
-        const d = new Date(t.createdAt || Date.now());
-        return d.toDateString() === new Date().toDateString();
-      })
-      .reduce((acc: number, t: any) => acc + (t.pnl || 0), 0);
+    // Fetch last 100 trades for full analysis
+    const trades = await storage.getTrades(100);
+    const tradeList: any[] = trades || [];
 
-    return `You are POLYBOT-AI, an intelligent trading assistant embedded in a retro CRT terminal interface.
+    // Compute stats
+    const resolvedTrades = tradeList.filter((t: any) => t.status === "won" || t.status === "lost");
+    const wins = resolvedTrades.filter((t: any) => t.status === "won").length;
+    const losses = resolvedTrades.filter((t: any) => t.status === "lost").length;
+    const winRate = resolvedTrades.length > 0 ? ((wins / resolvedTrades.length) * 100).toFixed(1) : "N/A";
+    const totalPnl = resolvedTrades.reduce((acc: number, t: any) => acc + (t.pnl || 0), 0);
+    const avgWin = wins > 0
+      ? (resolvedTrades.filter((t: any) => t.status === "won").reduce((a: number, t: any) => a + (t.pnl || 0), 0) / wins).toFixed(2)
+      : "0";
+    const avgLoss = losses > 0
+      ? (resolvedTrades.filter((t: any) => t.status === "lost").reduce((a: number, t: any) => a + (t.pnl || 0), 0) / losses).toFixed(2)
+      : "0";
 
-## PERSONALITY
-- Sharp, concise, no-nonsense trading intelligence
-- Use plain text; ALL CAPS for emphasis when needed
-- Deep knowledge: crypto markets, Polymarket prediction markets, Kelly Criterion, Bayesian inference, order book analysis, CLOB strategies, quantitative trading, momentum, mean reversion
+    // Today's trades
+    const today = new Date().toDateString();
+    const todayTrades = tradeList.filter((t: any) => new Date(t.createdAt || 0).toDateString() === today);
+    const todayPnl = todayTrades.reduce((acc: number, t: any) => acc + (t.pnl || 0), 0);
+    const todayWins = todayTrades.filter((t: any) => t.status === "won").length;
+    const todayLosses = todayTrades.filter((t: any) => t.status === "lost").length;
 
-## LIVE BOT STATUS (as of this message)
-- Portfolio Balance : $${s.totalBalance?.toFixed(2) || "N/A"}
-- Starting Balance  : $${s.startingBalance?.toFixed(2) || "N/A"}
-- Total Return      : ${s.totalBalance && s.startingBalance ? (((s.totalBalance - s.startingBalance) / s.startingBalance) * 100).toFixed(2) : "N/A"}%
-- Today PnL         : $${todayPnl.toFixed(2)}
-- Win Rate          : ${total > 0 ? ((wins / total) * 100).toFixed(1) : "N/A"}% (${wins}/${total} recent)
-- Bot Running       : ${s.isRunning ? "YES" : "NO"}
-- Bet Size          : $${s.betSize} per trade
-- Max Bets/Day      : ${s.maxBetsPerDay}
-- Daily Stop Loss   : ${s.dailyStopLossPct}%
-- Min Edge          : ${s.minEdgePct}%
-- Assets            : BTC, ETH, SOL (Alpaca paper) + Polymarket CLOB
+    // Per-asset breakdown
+    const assetMap: Record<string, { trades: number; wins: number; pnl: number }> = {};
+    for (const t of resolvedTrades) {
+      const sym = (t.market || "UNKNOWN").includes("ETH") ? "ETH" :
+                  (t.market || "UNKNOWN").includes("SOL") ? "SOL" : "BTC";
+      if (!assetMap[sym]) assetMap[sym] = { trades: 0, wins: 0, pnl: 0 };
+      assetMap[sym].trades++;
+      if (t.status === "won") assetMap[sym].wins++;
+      assetMap[sym].pnl += t.pnl || 0;
+    }
+    const assetBreakdown = Object.entries(assetMap)
+      .map(([sym, d]) => `  ${sym}: ${d.trades} trades, ${d.trades > 0 ? ((d.wins/d.trades)*100).toFixed(0) : 0}% win, PnL $${d.pnl.toFixed(2)}`)
+      .join("\n");
 
-## CAPABILITIES
-1. Answer trading strategy / algorithm questions
-2. Search the web for live crypto news and research
-3. Analyze bot performance and suggest parameter improvements
-4. Explain quant concepts relevant to the user's setup
-5. Help plan strategy enhancements
+    // Recent 10 trades summary
+    const recentSummary = tradeList.slice(0, 10).map((t: any) =>
+      `  [${t.status?.toUpperCase() || "OPEN"}] ${t.market?.slice(0, 40) || "?"} | $${(t.betSize || 0).toFixed(2)} bet | PnL: $${(t.pnl || 0).toFixed(2)}`
+    ).join("\n");
 
-## FORMAT
-- Be concise. Bullet points when listing.
-- For web results: summarize key finding then provide analysis
-- For parameter recommendations: give exact values
-- Current time: ${new Date().toISOString()}`;
-  } catch {
-    return `You are POLYBOT-AI, a trading assistant. Be concise and helpful. Time: ${new Date().toISOString()}`;
+    // Alpaca live positions
+    let positionsSection = "  No positions data available";
+    let accountSection = "  No account data available";
+    try {
+      const apiKey = s.alpacaApiKey || "";
+      const apiSecret = s.alpacaApiSecret || "";
+      if (apiKey && apiSecret) {
+        const [acctResult, posResult] = await Promise.all([
+          fetchAlpacaAccount(apiKey, apiSecret),
+          fetchAlpacaPositions(apiKey, apiSecret),
+        ]);
+        if (acctResult.ok) {
+          const a = acctResult.account;
+          accountSection = [
+            `  Account: ${acctResult.isLive ? "LIVE" : "PAPER"} | Status: ${a.status}`,
+            `  Portfolio Value: $${parseFloat(a.portfolio_value).toFixed(2)}`,
+            `  Cash:            $${parseFloat(a.cash).toFixed(2)}`,
+            `  Equity:          $${parseFloat(a.equity).toFixed(2)}`,
+            `  Buying Power:    $${parseFloat(a.buying_power).toFixed(2)}`,
+            `  Last Close Eq:   $${parseFloat(a.last_equity).toFixed(2)}`,
+            `  Day Change:      $${(parseFloat(a.equity) - parseFloat(a.last_equity)).toFixed(2)}`,
+          ].join("\n");
+        }
+        if (posResult.ok && posResult.positions && posResult.positions.length > 0) {
+          positionsSection = posResult.positions.map((p: any) =>
+            `  ${p.symbol} | ${p.side.toUpperCase()} ${parseFloat(p.qty).toFixed(4)} units | Entry: $${parseFloat(p.avg_entry_price).toFixed(2)} | Current: $${parseFloat(p.current_price).toFixed(2)} | Mkt Value: $${parseFloat(p.market_value).toFixed(2)} | Unr. P&L: $${parseFloat(p.unrealized_pl).toFixed(2)} (${(parseFloat(p.unrealized_plpc)*100).toFixed(2)}%)`
+          ).join("\n");
+        } else if (posResult.ok) {
+          positionsSection = "  No open positions currently";
+        }
+      }
+    } catch (_) {
+      // non-fatal
+    }
+
+    // Copy trades stats
+    let copySection = "  No copy trade data";
+    try {
+      const copyTrades = await storage.getCopyTrades(50);
+      const ct: any[] = copyTrades || [];
+      const ctFilled = ct.filter((t: any) => t.status === "filled").length;
+      const ctSpent = ct.reduce((a: number, t: any) => a + (t.usdcSpent || 0), 0);
+      copySection = `  ${ct.length} total copy trades | ${ctFilled} filled | $${ctSpent.toFixed(2)} USDC deployed`;
+    } catch (_) {}
+
+    return `You are POLYBOT-AI, the intelligent trading assistant embedded inside PolyBot — a retro CRT crypto trading terminal.
+
+## YOUR PERSONALITY
+- Sharp, concise, no-nonsense quant trading intelligence
+- Deep expertise: crypto markets, Polymarket prediction markets, Kelly Criterion, Bayesian inference, order book imbalance, CLOB strategies, momentum, mean reversion, statistical edge
+- Use plain text. ALL CAPS for emphasis. Be direct.
+- You have FULL access to the user's portfolio, live positions, and complete trade history below — use it to give specific, data-driven insights
+
+## LIVE ALPACA ACCOUNT
+${accountSection}
+
+## OPEN POSITIONS (Alpaca)
+${positionsSection}
+
+## BOT CONFIGURATION
+- Running        : ${s.isRunning ? "YES" : "NO"}
+- Bet Size       : $${s.betSize} per trade
+- Max Bets/Day   : ${s.maxBetsPerDay}
+- Daily Stop Loss: ${s.dailyStopLossPct}%
+- Min Edge       : ${s.minEdgePct}%
+- Assets         : BTC, ETH, SOL (Alpaca) + Polymarket CLOB
+- Starting Bal   : $${s.startingBalance?.toFixed(2)}
+- Current Bal    : $${s.totalBalance?.toFixed(2)}
+- Total Return   : ${s.totalBalance && s.startingBalance ? (((s.totalBalance - s.startingBalance) / s.startingBalance) * 100).toFixed(2) : "N/A"}%
+
+## PERFORMANCE STATISTICS (last ${resolvedTrades.length} resolved trades)
+- Win Rate  : ${winRate}% (${wins}W / ${losses}L)
+- Total PnL : $${totalPnl.toFixed(2)}
+- Avg Win   : +$${avgWin}
+- Avg Loss  : $${avgLoss}
+- Exp. Value: $${((wins > 0 ? parseFloat(avgWin) : 0) * (resolvedTrades.length > 0 ? wins/resolvedTrades.length : 0) + (losses > 0 ? parseFloat(avgLoss) : 0) * (resolvedTrades.length > 0 ? losses/resolvedTrades.length : 0)).toFixed(3)} per trade
+
+## TODAY'S SESSION
+- Trades    : ${todayTrades.length} (${todayWins}W / ${todayLosses}L)
+- Today PnL : $${todayPnl.toFixed(2)}
+
+## PER-ASSET BREAKDOWN
+${assetBreakdown || "  No data yet"}
+
+## COPY TRADING
+${copySection}
+
+## RECENT 10 TRADES
+${recentSummary || "  No trades yet"}
+
+## YOUR CAPABILITIES
+1. Analyze the portfolio and give specific improvement recommendations
+2. Search the web for live crypto news, research, and market conditions
+3. Explain and suggest trading algorithms, parameter tuning, risk management
+4. Identify patterns in the trade history above
+5. Help schedule or plan strategy enhancements
+
+## RESPONSE FORMAT
+- Be concise and direct. Use bullet points for lists.
+- Reference the actual numbers from the portfolio data above in your answers
+- For parameter changes: give exact recommended values
+- For web results: summarize then give your analysis
+
+Current time: ${new Date().toISOString()}`;
+
+  } catch (err: any) {
+    return `You are POLYBOT-AI, a trading assistant with web search. Error loading portfolio context: ${err.message}. Be helpful with general trading questions. Time: ${new Date().toISOString()}`;
   }
 }
 
