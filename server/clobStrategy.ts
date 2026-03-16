@@ -22,12 +22,13 @@ import { placeClobOrder } from "./polymarketClient";
 const GAMMA_API   = "https://gamma-api.polymarket.com";
 const CLOB_API    = "https://clob.polymarket.com";
 const POLY_FEE    = 0.02;   // 2% Polymarket fee
-const MIN_EV      = 0.005;  // minimum net EV (0.5%) — matches original
+const MIN_EV      = 0.015;  // minimum net EV raised to 1.5% — filters weak signals
 const MAX_KELLY   = 0.05;   // cap Kelly at 5% of balance per trade
 const MIN_BET     = 10.0;   // $10 minimum
 const MAX_BET     = 100.0;  // $100 maximum per trade
 const TICK_MS     = 10000;  // 10 seconds
-const MAX_PER_DAY = 1000;   // up to 1000 CLOB trades/day
+const MAX_PER_DAY = 200;    // max 200 CLOB trades/day (was 1000 — reduces fee erosion)
+const MAX_PER_TICK = 2;     // max 2 bets per tick
 
 // ─── Order book imbalance cache ───────────────────────────────────────────────
 // Stores latest bid/ask imbalance per tokenId: >0 = buy pressure, <0 = sell pressure
@@ -375,7 +376,7 @@ async function findEdgeOpps(markets: ClobMarket[], bayesMap: Record<string, Baye
 
     // ── YES side: adjusted model says UP more than market thinks
     const evYes = calcEV(adjYesProb, mkt.yesPrice);
-    if (evYes > MIN_EV && mkt.timeRemaining > 30) {
+    if (evYes > MIN_EV && mkt.timeRemaining > 60) {
       const rPrice = reservationPrice(mkt.yesPrice, variance, mkt.timeRemaining);
       const kf     = kellyFraction(adjYesProb, rPrice);
       if (kf > 0) {
@@ -395,7 +396,7 @@ async function findEdgeOpps(markets: ClobMarket[], bayesMap: Record<string, Baye
 
     // ── NO side: adjusted model says DOWN, market underprices NO
     const evNo = calcEV(adjNoProb, mkt.noPrice);
-    if (evNo > MIN_EV && mkt.timeRemaining > 30) {
+    if (evNo > MIN_EV && mkt.timeRemaining > 60) {
       const rPrice = reservationPrice(mkt.noPrice, variance, mkt.timeRemaining);
       const kf     = kellyFraction(adjNoProb, rPrice);
       if (kf > 0) {
@@ -506,11 +507,11 @@ export function startClobStrategy() {
 
       console.log(`[CLOBv2] ${opps.length} edge opps | top EV=${(opps[0].evNet*100).toFixed(2)}%`);
 
-      // 4. Place top opportunities (max 5 per tick)
-      const limit = Math.min(5, opps.length, MAX_PER_DAY - todayCount);
+      // 4. Place top opportunities (max MAX_PER_TICK per tick)
+      const limit = Math.min(MAX_PER_TICK, opps.length, MAX_PER_DAY - todayCount);
       for (let i = 0; i < limit; i++) {
         await placeBet(opps[i], settings.totalBalance, settings);
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise(r => setTimeout(r, 500)); // 500ms cooldown between orders
       }
 
     } catch (err) {
