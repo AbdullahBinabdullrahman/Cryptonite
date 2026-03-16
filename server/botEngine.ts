@@ -19,6 +19,7 @@
 
 import { storage } from "./storage";
 import { placeAlpacaOrder, fetchOrderStatus } from "./alpacaOrders";
+import { crowdConfirms } from "./polymarketSignal";
 
 // ─── Asset definitions ────────────────────────────────────────────────────────
 interface Asset {
@@ -299,11 +300,27 @@ async function processAsset(asset: Asset, settings: any) {
     return;
   }
 
-  // Kelly bet sizing: edge% / (1 / limitPrice - 1), clamped $10–$100
-  const impliedOdds = 0.5 + signal.edgePct / 200; // rough implied win prob
-  const b = (1 - impliedOdds) / impliedOdds; // payout odds per $1
+  // ── Polymarket crowd confirmation ─────────────────────────────────────────
+  // Check if the Polymarket crowd agrees with our EMA signal (free signal, no deposit)
+  // Only skip if crowd actively DISAGREES — missing data = allow trade
+  const assetLabel = asset.label === "BTC" ? "BTC" : asset.label === "ETH" ? "ETH" : "SOL";
+  const { confirmed, signal: polySignal, reason } = await crowdConfirms(assetLabel, signal.direction);
+  if (!confirmed) {
+    console.log(`[BotEngine] ${asset.label} EMA signal BLOCKED by Polymarket: ${reason}`);
+    return;
+  }
+  const confidenceBoost = polySignal ? polySignal.confidence : 0;
+  console.log(`[BotEngine] ${asset.label} crowd check PASSED: ${reason}`);
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // Kelly bet sizing — boost when Polymarket crowd is highly confident
+  // confidenceBoost: 0 = crowd neutral, 1 = crowd very confident
+  // Extra scaling: +50% bet size when crowd confidence > 0.3
+  const impliedOdds = 0.5 + signal.edgePct / 200;
+  const b = (1 - impliedOdds) / impliedOdds;
   const rawKelly = settings.totalBalance * Math.max(0, (b * impliedOdds - (1 - impliedOdds)) / b);
-  const betSize  = Math.round(Math.min(100, Math.max(10, rawKelly)) * 100) / 100;
+  const crowdMultiplier = 1 + (confidenceBoost > 0.3 ? confidenceBoost * 0.5 : 0);
+  const betSize = Math.round(Math.min(100, Math.max(10, rawKelly * crowdMultiplier)) * 100) / 100;
 
   const market = asset.markets[Math.floor(Math.random() * asset.markets.length)];
 
