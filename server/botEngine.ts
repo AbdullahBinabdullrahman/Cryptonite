@@ -195,17 +195,17 @@ function detectSignal(asset: Asset, price: number): Signal | null {
 
   // Also allow trades when EMA gap widens significantly (strong trend, no fresh cross needed)
   const emaGapPct = Math.abs((newEma5 - newEma15) / newEma15) * 100;
-  const strongTrend = emaGapPct > 0.05; // EMA gap > 0.05% = confirmed trend
+  const strongTrend = emaGapPct > 0.02; // EMA gap > 0.02% = confirmed trend (lowered from 0.05)
 
   let direction: "buy" | "sell" | null = null;
 
-  if (crossedUp && change5m > 0) {
-    direction = "buy";
-  } else if (crossedDown && change5m < 0) {
-    direction = "sell";
-  } else if (strongTrend && isBullish && change5m > 0.02) {
+  if (crossedUp) {
+    direction = "buy";   // EMA cross up — always fire
+  } else if (crossedDown) {
+    direction = "sell";  // EMA cross down — always fire
+  } else if (strongTrend && isBullish && change5m > 0.01) {
     direction = "buy";   // riding confirmed uptrend
-  } else if (strongTrend && !isBullish && change5m < -0.02) {
+  } else if (strongTrend && !isBullish && change5m < -0.01) {
     direction = "sell";  // riding confirmed downtrend
   }
 
@@ -219,9 +219,9 @@ function detectSignal(asset: Asset, price: number): Signal | null {
 }
 
 // ─── Win-rate circuit breaker ─────────────────────────────────────────────────
-const CB_WINDOW     = 20;   // look at last 20 resolved trades
-const CB_MIN_RATE   = 0.35; // pause if win rate < 35%
-const CB_PAUSE_MS   = 30 * 60 * 1000; // 30 minutes
+const CB_WINDOW     = 10;   // look at last 10 resolved trades
+const CB_MIN_RATE   = 0.25; // pause if win rate < 25% (lenient while warming up)
+const CB_PAUSE_MS   = 15 * 60 * 1000; // 15 minutes pause
 
 function checkCircuitBreaker(asset: Asset): boolean {
   if (Date.now() < asset.circuitBreakerUntil) {
