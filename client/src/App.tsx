@@ -16,9 +16,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import Portfolio from "@/pages/Portfolio";
 import { LiveBotSprite } from "@/components/BotSprite";
+import TerminalChat from "@/pages/TerminalChat";
 import {
   LayoutDashboard, TrendingUp, List, Settings2, Zap, Copy,
-  Bot, Menu, X, PieChart
+  Bot, Menu, X, PieChart, Terminal
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -27,7 +28,8 @@ const NAV_ITEMS = [
   { href: "/markets",   icon: TrendingUp,      label: "Markets",    code: "03" },
   { href: "/trades",    icon: List,            label: "Trades",     code: "04" },
   { href: "/copy",      icon: Copy,            label: "Copy Trade", code: "05" },
-  { href: "/settings",  icon: Settings2,       label: "Config",     code: "06" },
+  { href: "/chat",      icon: Terminal,        label: "AI Agent",   code: "06" },
+  { href: "/settings",  icon: Settings2,       label: "Config",     code: "07" },
 ];
 
 // ── Bot status display ────────────────────────────────────────────────────────
@@ -300,8 +302,9 @@ function AppShell() {
               <Route path="/portfolio" component={Portfolio}  />
               <Route path="/markets"   component={Markets}    />
               <Route path="/trades"    component={Trades}     />
-              <Route path="/copy"      component={CopyTrade}  />
-              <Route path="/settings"  component={Settings}   />
+              <Route path="/copy"      component={CopyTrade}    />
+              <Route path="/chat"      component={TerminalChat} />
+              <Route path="/settings"  component={Settings}     />
               <Route component={NotFound} />
             </Switch>
           </main>

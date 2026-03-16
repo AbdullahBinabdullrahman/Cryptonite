@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import { registerRoutes } from "./routes";
+import { registerChatRoutes } from "./chatRoutes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initAuthTables } from "./auth";
@@ -97,6 +98,7 @@ app.use((req, res, next) => {
   initAuthTables();
 
   await registerRoutes(httpServer, app);
+  registerChatRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
