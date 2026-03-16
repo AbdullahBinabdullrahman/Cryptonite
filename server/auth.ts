@@ -66,6 +66,28 @@ export function initAuthTables() {
     console.log("[Auth] Owner account seeded: a.maher.bina@gmail.com");
   }
   db.close();
+
+  // Always ensure owner password is set on startup (handles redeploys wiping DB)
+  setOwnerPasswordOnStartup().catch(e => console.warn("[Auth] Password seed error:", e));
+}
+
+async function setOwnerPasswordOnStartup() {
+  const OWNER_EMAIL = "a.maher.bina@gmail.com";
+  const OWNER_PASS  = process.env.OWNER_PASSWORD || "n1surrenderftw";
+  const db = getDb();
+  try {
+    const user = db.prepare("SELECT id, password_hash FROM users WHERE email = ?").get(OWNER_EMAIL) as any;
+    if (!user) return; // shouldn't happen after seed above
+    if (!user.password_hash) {
+      // Password not set — hash and save it
+      const hash = await bcrypt.hash(OWNER_PASS, 12);
+      db.prepare("UPDATE users SET password_hash = ? WHERE email = ?").run(hash, OWNER_EMAIL);
+      console.log("[Auth] Owner password seeded automatically");
+    }
+  } finally {
+    db.close();
+  }
+// closing brace intentionally omitted — see initAuthTables closing brace above
 }
 
 // ─── Password auth ────────────────────────────────────────────────────────────
