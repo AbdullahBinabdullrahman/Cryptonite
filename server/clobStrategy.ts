@@ -24,10 +24,14 @@ const CLOB_API    = "https://clob.polymarket.com";
 const POLY_FEE    = 0.02;   // 2% Polymarket fee
 const MIN_EV      = 0.005;  // minimum net EV (0.5%) — matches original
 const MAX_KELLY   = 0.05;   // cap Kelly at 5% of balance per trade
-const MIN_BET     = 1.0;    // $1 minimum (like original strategy)
-const MAX_BET     = 10.0;   // $10 maximum per trade
+const MIN_BET     = 10.0;   // $10 minimum
+const MAX_BET     = 100.0;  // $100 maximum per trade
 const TICK_MS     = 10000;  // 10 seconds
-const MAX_PER_DAY = 500;    // up to 500 CLOB trades/day
+const MAX_PER_DAY = 1000;   // up to 1000 CLOB trades/day
+
+// ─── Order book imbalance cache ───────────────────────────────────────────────
+// Stores latest bid/ask imbalance per tokenId: >0 = buy pressure, <0 = sell pressure
+const obImbalanceCache: Map<string, { imbalance: number; ts: number }> = new Map();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -142,6 +146,66 @@ function reservationPrice(midPrice: number, variance: number, timeRemaining: num
   const adjustment = gamma * variance / timeRemaining * 300; // normalize to minutes
   // Slightly inside the mid to get filled
   return Math.max(0.01, Math.min(0.99, midPrice - adjustment));
+}
+
+
+// ─── Order Book Imbalance ─────────────────────────────────────────────────────
+/**
+ * Fetch order book depth for a token and compute bid/ask imbalance.
+ *
+ * Imbalance = (totalBidQty - totalAskQty) / (totalBidQty + totalAskQty)
+ *   > +0.2  → strong buy pressure  → boost YES confidence
+ *   < -0.2  → strong sell pressure → boost NO confidence
+ *
+ * Cached for 8s (one tick) to avoid hammering the CLOB API.
+ */
+async function fetchOrderBookImbalance(tokenId: string): Promise<number> {
+  const cached = obImbalanceCache.get(tokenId);
+  if (cached && Date.now() - cached.ts < 8000) return cached.imbalance;
+
+  try {
+    const res = await fetch(`${CLOB_API}/book?token_id=${tokenId}`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return 0;
+
+    const book = await res.json() as {
+      bids?: { price: string; size: string }[];
+      asks?: { price: string; size: string }[];
+    };
+
+    const bids = book.bids ?? [];
+    const asks = book.asks ?? [];
+
+    // Use top-3 levels only to measure near-mid pressure
+    const topBids = bids.slice(0, 3);
+    const topAsks = asks.slice(0, 3);
+
+    const bidQty = topBids.reduce((s, l) => s + parseFloat(l.size), 0);
+    const askQty = topAsks.reduce((s, l) => s + parseFloat(l.size), 0);
+    const total  = bidQty + askQty;
+
+    const imbalance = total > 0 ? (bidQty - askQty) / total : 0;
+    obImbalanceCache.set(tokenId, { imbalance, ts: Date.now() });
+    return imbalance;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Imbalance-adjusted probability:
+ * When the order book shows strong buy pressure (imbalance > 0.2),
+ * the true probability is likely higher than the Bayesian estimate alone.
+ * We apply a small boost/penalty to the model probability.
+ *
+ *   adjustedProb = modelProb + OB_WEIGHT × imbalance
+ *   OB_WEIGHT = 0.08 (8% max shift from order book signal)
+ */
+const OB_WEIGHT = 0.08;
+
+function adjustProbWithOrderBook(modelProb: number, imbalance: number): number {
+  return Math.max(0.05, Math.min(0.95, modelProb + OB_WEIGHT * imbalance));
 }
 
 // ─── Price fetching ───────────────────────────────────────────────────────────
@@ -290,47 +354,55 @@ function kellyFraction(winProb: number, limitPrice: number): number {
 
 // ─── Find edge opportunities ──────────────────────────────────────────────────
 
-function findEdgeOpps(markets: ClobMarket[], bayesMap: Record<string, BayesState>): EdgeOpp[] {
+async function findEdgeOpps(markets: ClobMarket[], bayesMap: Record<string, BayesState>): Promise<EdgeOpp[]> {
   const opps: EdgeOpp[] = [];
 
   for (const mkt of markets) {
     const state = bayesMap[mkt.asset];
     if (!state || state.ticks.length < 3) continue;
 
-    const posterior = state.posterior; // P(BTC goes up)
+    const posterior = state.posterior; // P(BTC goes up) from Bayesian
     const variance  = state.variance;
 
-    // ── YES side: model says UP more than market thinks
-    const evYes = calcEV(posterior, mkt.yesPrice);
+    // ── Fetch order book imbalance for YES token
+    // imbalance > 0  → more bids than asks → crowd expects YES
+    // imbalance < 0  → more asks than bids → crowd expects NO
+    const obImbalance = await fetchOrderBookImbalance(mkt.tokenIdYes);
+
+    // Adjust model probability with order book signal
+    const adjYesProb = adjustProbWithOrderBook(posterior,       obImbalance);
+    const adjNoProb  = adjustProbWithOrderBook(1 - posterior,  -obImbalance);
+
+    // ── YES side: adjusted model says UP more than market thinks
+    const evYes = calcEV(adjYesProb, mkt.yesPrice);
     if (evYes > MIN_EV && mkt.timeRemaining > 30) {
       const rPrice = reservationPrice(mkt.yesPrice, variance, mkt.timeRemaining);
-      const kf     = kellyFraction(posterior, rPrice);
+      const kf     = kellyFraction(adjYesProb, rPrice);
       if (kf > 0) {
         opps.push({
           market: mkt,
           prior: state.prior,
-          posterior,
+          posterior: adjYesProb,  // store OB-adjusted value
           evNet: evYes,
           side: "YES",
           tokenId: mkt.tokenIdYes,
           limitPrice: rPrice,
           kellyFraction: kf,
-          betSize: 0, // filled later
+          betSize: 0,
         });
       }
     }
 
-    // ── NO side: model says DOWN, market underprices NO
-    const noModelProb = 1 - posterior;
-    const evNo = calcEV(noModelProb, mkt.noPrice);
+    // ── NO side: adjusted model says DOWN, market underprices NO
+    const evNo = calcEV(adjNoProb, mkt.noPrice);
     if (evNo > MIN_EV && mkt.timeRemaining > 30) {
       const rPrice = reservationPrice(mkt.noPrice, variance, mkt.timeRemaining);
-      const kf     = kellyFraction(noModelProb, rPrice);
+      const kf     = kellyFraction(adjNoProb, rPrice);
       if (kf > 0) {
         opps.push({
           market: mkt,
           prior: state.prior,
-          posterior,
+          posterior: adjNoProb,
           evNet: evNo,
           side: "NO",
           tokenId: mkt.tokenIdNo,
@@ -429,7 +501,7 @@ export function startClobStrategy() {
       if (!markets.length) return;
 
       // 3. Find edge opportunities
-      const opps = findEdgeOpps(markets, bayesState);
+      const opps = await findEdgeOpps(markets, bayesState);
       if (!opps.length) return;
 
       console.log(`[CLOBv2] ${opps.length} edge opps | top EV=${(opps[0].evNet*100).toFixed(2)}%`);
@@ -466,25 +538,34 @@ export async function getClobSnapshot() {
     }
   }
 
-  const rows = markets.slice(0, 30).map(m => {
-    const state = bayesState[m.asset];
-    const posterior = state?.posterior ?? 0.5;
-    const variance  = state?.variance  ?? 0.0001;
-    const evYes = calcEV(posterior, m.yesPrice);
-    const evNo  = calcEV(1 - posterior, m.noPrice);
-    const bestEv   = Math.max(evYes, evNo);
-    const bestSide = evYes >= evNo ? "YES" : "NO";
+  // Fetch OB imbalance for all markets in parallel (for UI display)
+  const imbalances = await Promise.all(
+    markets.slice(0, 30).map(m => fetchOrderBookImbalance(m.tokenIdYes))
+  );
+
+  const rows = markets.slice(0, 30).map((m, i) => {
+    const state      = bayesState[m.asset];
+    const posterior  = state?.posterior ?? 0.5;
+    const variance   = state?.variance  ?? 0.0001;
+    const obImb      = imbalances[i] ?? 0;
+    const adjYes     = adjustProbWithOrderBook(posterior,      obImb);
+    const adjNo      = adjustProbWithOrderBook(1 - posterior, -obImb);
+    const evYes      = calcEV(adjYes, m.yesPrice);
+    const evNo       = calcEV(adjNo,  m.noPrice);
+    const bestEv     = Math.max(evYes, evNo);
+    const bestSide   = evYes >= evNo ? "YES" : "NO";
     return {
-      question:   m.question,
-      asset:      m.asset,
-      yesPrice:   Math.round(m.yesPrice * 1000) / 1000,
-      noPrice:    Math.round(m.noPrice  * 1000) / 1000,
-      posterior:  Math.round(posterior  * 1000) / 1000,
-      evNet:      Math.round(bestEv * 10000) / 100,
-      side:       bestSide,
-      liquidity:  Math.round(m.liquidity),
-      hasEdge:    bestEv > MIN_EV,
-      timeLeft:   Math.round(m.timeRemaining),
+      question:    m.question,
+      asset:       m.asset,
+      yesPrice:    Math.round(m.yesPrice  * 1000) / 1000,
+      noPrice:     Math.round(m.noPrice   * 1000) / 1000,
+      posterior:   Math.round(adjYes      * 1000) / 1000,  // OB-adjusted
+      obImbalance: Math.round(obImb       * 1000) / 1000,
+      evNet:       Math.round(bestEv * 10000) / 100,
+      side:        bestSide,
+      liquidity:   Math.round(m.liquidity),
+      hasEdge:     bestEv > MIN_EV,
+      timeLeft:    Math.round(m.timeRemaining),
     };
   });
 

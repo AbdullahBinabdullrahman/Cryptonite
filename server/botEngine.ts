@@ -196,8 +196,11 @@ async function processAsset(asset: Asset, settings: any) {
     const liquidity = 15000 + Math.random() * 80000;
 
     if (edgePct >= settings.minEdgePct && liquidity >= 10000) {
-      const betSize = Math.round(
-        Math.min(settings.betSize, settings.totalBalance * 0.02) * 100
+      // Scale bet size: Kelly-inspired — edge% drives fraction, capped at $100
+      // 0.02 = 2% of balance per trade (conservative), floor $25, cap $100
+      const kellyBet = settings.totalBalance * Math.min(0.02, (edgePct / 100) * 0.5);
+      const betSize  = Math.round(
+        Math.min(100, Math.max(25, kellyBet)) * 100
       ) / 100;
 
       // Alpaca crypto minimum order is $10
