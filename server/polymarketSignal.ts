@@ -61,8 +61,8 @@ async function fetchMarketList(): Promise<RawMarket[]> {
   }
   try {
     const res = await fetch(
-      `${GAMMA_API}/markets?active=true&closed=false&limit=300&order=endDate&ascending=true`,
-      { signal: AbortSignal.timeout(8000) }
+      `${GAMMA_API}/markets?active=true&closed=false&limit=500&order=startDate&ascending=false`,
+      { signal: AbortSignal.timeout(10000) }
     );
     if (!res.ok) return marketListCache.data;
     const raw = await res.json() as RawMarket[];
@@ -139,8 +139,11 @@ export async function getPolySignal(asset: string): Promise<PolySignal | null> {
 
     const relevant = markets.filter(m => {
       const q = (m.question || "").toLowerCase();
+      // Match both "Bitcoin Up or Down" and "up or down" patterns
       if (!q.includes("up or down")) return false;
       if (!q.includes(assetKeyword)) return false;
+      // Must have some liquidity to be meaningful
+      if (parseFloat(m.liquidity || "0") < 500) return false;
       if (!m.active || m.closed) return false;
       const end = m.endDate ? new Date(m.endDate).getTime() : 0;
       const remaining = (end - now) / 1000;
