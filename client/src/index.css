@@ -2,45 +2,66 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&f[]=cabinet-grotesk@400,500,700,800&display=swap');
+/* ── Retro pixel font + monospace terminal fonts ─────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Share+Tech+Mono&family=VT323:wght@400&display=swap');
 
 @layer base {
   :root {
-    /* Crypto dark theme — electric teal accent on deep slate */
-    --background: 220 16% 8%;
-    --foreground: 210 20% 94%;
-    --card: 220 14% 11%;
-    --card-foreground: 210 20% 94%;
-    --popover: 220 14% 11%;
-    --popover-foreground: 210 20% 94%;
-    --primary: 175 75% 42%;
-    --primary-foreground: 220 16% 8%;
-    --secondary: 220 12% 16%;
-    --secondary-foreground: 210 15% 75%;
-    --muted: 220 12% 16%;
-    --muted-foreground: 210 10% 55%;
-    --accent: 175 75% 42%;
-    --accent-foreground: 220 16% 8%;
-    --destructive: 0 65% 50%;
-    --destructive-foreground: 210 20% 94%;
-    --border: 220 12% 18%;
-    --input: 220 12% 16%;
-    --ring: 175 75% 42%;
-    --radius: 0.75rem;
+    /* ── RETRO CRT PALETTE ──────────────────────────────────────── */
+    /* Background: near-black CRT screen */
+    --background:    220 20% 4%;
+    --foreground:    120 100% 75%;   /* phosphor green */
 
-    /* Custom semantic tokens */
-    --color-up: 142 72% 45%;
-    --color-down: 0 65% 50%;
-    --color-neutral: 210 10% 55%;
-    --color-edge: 47 96% 55%;
-    --color-teal: 175 75% 42%;
-    --color-surface-2: 220 12% 14%;
+    /* Cards: slightly lighter CRT panel */
+    --card:          220 18% 7%;
+    --card-foreground: 120 100% 75%;
 
-    --font-display: 'Cabinet Grotesk', sans-serif;
-    --font-body: 'Satoshi', sans-serif;
+    --popover:       220 18% 7%;
+    --popover-foreground: 120 100% 75%;
+
+    /* Primary: phosphor green */
+    --primary:       120 100% 50%;
+    --primary-foreground: 220 20% 4%;
+
+    /* Secondary: dim CRT surface */
+    --secondary:     220 15% 10%;
+    --secondary-foreground: 120 60% 55%;
+
+    /* Muted */
+    --muted:         220 15% 10%;
+    --muted-foreground: 120 30% 40%;
+
+    /* Accent: amber/gold — "coin" color */
+    --accent:        45 100% 55%;
+    --accent-foreground: 220 20% 4%;
+
+    /* Destructive: alarm red */
+    --destructive:   0 90% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders: dim phosphor scan line */
+    --border:        120 40% 15%;
+    --input:         220 15% 10%;
+    --ring:          120 100% 50%;
+    --radius:        0.125rem;   /* sharp pixel corners */
+
+    /* ── Custom semantic tokens ────────────────────────────── */
+    --color-up:       120 100% 50%;   /* phosphor green = win */
+    --color-down:     0 90% 55%;      /* alarm red = loss */
+    --color-neutral:  120 30% 40%;    /* dim green */
+    --color-edge:     45 100% 55%;    /* amber coin */
+    --color-teal:     175 90% 50%;    /* cyan accent */
+    --color-surface-2: 220 15% 8%;
+
+    /* ── Retro font stack ───────────────────────────────────── */
+    --font-pixel:   'Press Start 2P', monospace;
+    --font-mono:    'Share Tech Mono', monospace;
+    --font-display: 'VT323', monospace;
+    --font-body:    'Share Tech Mono', monospace;
   }
 }
 
+/* ── Reset with retro defaults ─────────────────────────────────────────────── */
 * {
   border-color: hsl(var(--border));
 }
@@ -48,85 +69,492 @@
 body {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-family: var(--font-body);
-  -webkit-font-smoothing: antialiased;
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: none;   /* keep pixels crisp / no AA */
+  image-rendering: pixelated;
+  /* subtle CRT texture */
+  background-image: 
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 255, 0, 0.015) 2px,
+      rgba(0, 255, 0, 0.015) 4px
+    );
 }
 
-/* Custom scrollbar */
+/* ── CRT scanline overlay (applied to root) ──────────────────────────────── */
+#root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.12) 3px,
+    rgba(0, 0, 0, 0.12) 4px
+  );
+}
+
+/* ── CRT vignette ─────────────────────────────────────────────────────────── */
+#root::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9998;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 60%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+}
+
+/* ── Custom scrollbar — thin phosphor line ────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: hsl(var(--background)); }
-::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+::-webkit-scrollbar-thumb { background: hsl(120 60% 20%); }
+::-webkit-scrollbar-thumb:hover { background: hsl(120 100% 50%); }
 
-/* Glow effects */
-.glow-teal {
-  box-shadow: 0 0 24px -4px hsl(175 75% 42% / 0.4);
-}
-.glow-up {
-  box-shadow: 0 0 20px -4px hsl(142 72% 45% / 0.4);
-}
-.glow-down {
-  box-shadow: 0 0 20px -4px hsl(0 65% 50% / 0.3);
+/* ── Phosphor glow utilities ──────────────────────────────────────────────── */
+.glow-green {
+  box-shadow: 0 0 8px hsl(120 100% 50% / 0.7),
+              0 0 20px hsl(120 100% 50% / 0.4),
+              0 0 40px hsl(120 100% 50% / 0.15);
+  text-shadow: 0 0 8px hsl(120 100% 50% / 0.9);
 }
 
-/* Pulse animation for live indicator */
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(1.3); }
+.glow-amber {
+  box-shadow: 0 0 8px hsl(45 100% 55% / 0.7),
+              0 0 20px hsl(45 100% 55% / 0.4),
+              0 0 40px hsl(45 100% 55% / 0.15);
+  text-shadow: 0 0 8px hsl(45 100% 55% / 0.9);
 }
-.pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
 
-/* Sweep animation for live data rows */
-@keyframes sweep-in {
+.glow-cyan {
+  box-shadow: 0 0 8px hsl(175 90% 50% / 0.6),
+              0 0 20px hsl(175 90% 50% / 0.3);
+  text-shadow: 0 0 8px hsl(175 90% 50% / 0.9);
+}
+
+.glow-red {
+  box-shadow: 0 0 8px hsl(0 90% 55% / 0.6),
+              0 0 20px hsl(0 90% 55% / 0.3);
+  text-shadow: 0 0 8px hsl(0 90% 55% / 0.8);
+}
+
+/* legacy alias */
+.glow-teal { @apply glow-cyan; }
+.glow-up   { @apply glow-green; }
+.glow-down { @apply glow-red; }
+.glow-edge { @apply glow-amber; }
+
+/* ── Pixel border (dashed retro) ──────────────────────────────────────────── */
+.pixel-border {
+  border: 2px solid hsl(120 60% 20%);
+  box-shadow: inset 0 0 0 1px hsl(120 40% 12%),
+              0 0 0 1px hsl(120 60% 20%);
+}
+
+.pixel-border-green {
+  border: 2px solid hsl(120 100% 50% / 0.5);
+  box-shadow: inset 0 0 0 1px hsl(120 100% 50% / 0.1),
+              0 0 8px hsl(120 100% 50% / 0.2);
+}
+
+.pixel-border-amber {
+  border: 2px solid hsl(45 100% 55% / 0.5);
+  box-shadow: inset 0 0 0 1px hsl(45 100% 55% / 0.1),
+              0 0 8px hsl(45 100% 55% / 0.2);
+}
+
+/* ── Retro card ───────────────────────────────────────────────────────────── */
+.retro-card {
+  background: hsl(220 18% 7%);
+  border: 1px solid hsl(120 40% 15%);
+  box-shadow: inset 0 1px 0 hsl(120 40% 18% / 0.4);
+  border-radius: 2px;
+  position: relative;
+}
+.retro-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, hsl(120 100% 50% / 0.3), transparent);
+}
+
+/* ── Blinking cursor ──────────────────────────────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.blink  { animation: blink 1s step-start infinite; }
+.blink-slow { animation: blink 2s step-start infinite; }
+
+/* ── CRT flicker ──────────────────────────────────────────────────────────── */
+@keyframes flicker {
+  0%, 95%, 100% { opacity: 1; }
+  96%           { opacity: 0.85; }
+  97%           { opacity: 1; }
+  98%           { opacity: 0.9; }
+}
+.flicker { animation: flicker 8s infinite; }
+
+/* ── Scanline sweep ───────────────────────────────────────────────────────── */
+@keyframes scanline {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+.scanline-sweep {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: linear-gradient(transparent, hsl(120 100% 50% / 0.08), transparent);
+  pointer-events: none;
+  animation: scanline 6s linear infinite;
+  z-index: 9997;
+}
+
+/* ── Typewriter / terminal text ───────────────────────────────────────────── */
+@keyframes typewriter {
+  from { width: 0; }
+  to   { width: 100%; }
+}
+.typewriter {
+  overflow: hidden;
+  white-space: nowrap;
+  animation: typewriter 1.5s steps(40) forwards;
+}
+
+/* ── Boot sequence text ───────────────────────────────────────────────────── */
+@keyframes boot-line {
   from { opacity: 0; transform: translateX(-8px); }
-  to { opacity: 1; transform: translateX(0); }
+  to   { opacity: 1; transform: translateX(0); }
 }
-.sweep-in { animation: sweep-in 0.3s ease-out; }
+.boot-line { animation: boot-line 0.25s ease-out forwards; opacity: 0; }
+.boot-line:nth-child(1) { animation-delay: 0.1s; }
+.boot-line:nth-child(2) { animation-delay: 0.3s; }
+.boot-line:nth-child(3) { animation-delay: 0.5s; }
+.boot-line:nth-child(4) { animation-delay: 0.7s; }
+.boot-line:nth-child(5) { animation-delay: 0.9s; }
 
-/* Number counter glow */
-.value-up { color: hsl(var(--color-up)); }
-.value-down { color: hsl(var(--color-down)); }
-.value-neutral { color: hsl(var(--color-neutral)); }
-.value-edge { color: hsl(var(--color-edge)); }
-
-/* Card hover lift */
-.card-lift { transition: transform 0.18s ease, box-shadow 0.18s ease; }
-.card-lift:hover { transform: translateY(-2px); box-shadow: 0 8px 32px -8px hsl(175 75% 42% / 0.15); }
-
-/* Gradient badge */
-.badge-edge {
-  background: linear-gradient(135deg, hsl(47 96% 55% / 0.15), hsl(47 96% 55% / 0.05));
-  border: 1px solid hsl(47 96% 55% / 0.3);
-  color: hsl(47 96% 55%);
+/* ── Pulse / live dot ─────────────────────────────────────────────────────── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 hsl(120 100% 50% / 0.5); }
+  50%       { opacity: 0.8; transform: scale(1.3); box-shadow: 0 0 0 4px hsl(120 100% 50% / 0); }
 }
+.pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
 
-/* Bot running pulse */
+/* ── Bot running pulse ────────────────────────────────────────────────────── */
 @keyframes bot-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 hsl(175 75% 42% / 0.4); }
-  50% { box-shadow: 0 0 0 8px hsl(175 75% 42% / 0); }
+  0%, 100% { box-shadow: 0 0 0 0 hsl(120 100% 50% / 0.5); }
+  50%       { box-shadow: 0 0 0 8px hsl(120 100% 50% / 0); }
 }
-.bot-running { animation: bot-pulse 2s ease-in-out infinite; }
+.bot-running { animation: bot-pulse 1.5s ease-in-out infinite; }
 
-/* Swipe card animation */
-@keyframes swipe-up { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-60px); opacity: 0; } }
-@keyframes swipe-down { from { transform: translateY(0); opacity: 1; } to { transform: translateY(60px); opacity: 0; } }
-.swiping-up { animation: swipe-up 0.3s ease-out forwards; }
+/* ── Row sweep-in ─────────────────────────────────────────────────────────── */
+@keyframes sweep-in {
+  from { opacity: 0; transform: translateX(-12px); background: hsl(120 100% 50% / 0.05); }
+  to   { opacity: 1; transform: translateX(0);     background: transparent; }
+}
+.sweep-in { animation: sweep-in 0.35s ease-out; }
+
+/* ── Swipe animations ─────────────────────────────────────────────────────── */
+@keyframes swipe-up   { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-60px); opacity: 0; } }
+@keyframes swipe-down { from { transform: translateY(0); opacity: 1; } to { transform: translateY(60px);  opacity: 0; } }
+.swiping-up   { animation: swipe-up   0.3s ease-out forwards; }
 .swiping-down { animation: swipe-down 0.3s ease-out forwards; }
-/* v1773498150 */
 
-/* Ticker scroll animation */
+/* ── Ticker scroll ────────────────────────────────────────────────────────── */
 @keyframes ticker-scroll {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }
 }
-.ticker-scroll > div {
-  animation: ticker-scroll 24s linear infinite;
+.ticker-scroll > div { animation: ticker-scroll 24s linear infinite; }
+.ticker-scroll:hover > div { animation-play-state: paused; }
+
+/* ── Health / XP bar ──────────────────────────────────────────────────────── */
+.health-bar {
+  height: 8px;
+  background: hsl(220 15% 10%);
+  border: 1px solid hsl(120 40% 20%);
+  border-radius: 0;
+  overflow: hidden;
+  position: relative;
 }
-.ticker-scroll:hover > div {
-  animation-play-state: paused;
+.health-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, hsl(120 100% 35%), hsl(120 100% 55%));
+  box-shadow: 0 0 8px hsl(120 100% 50% / 0.5);
+  transition: width 0.5s ease;
+  position: relative;
+}
+.health-bar-fill::after {
+  content: "";
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 3px;
+  background: hsl(120 100% 80%);
+  box-shadow: 0 0 6px hsl(120 100% 60%);
 }
 
-/* Glow edge (for BTC asset color) */
-.glow-edge {
-  box-shadow: 0 0 20px -4px hsl(47 96% 55% / 0.3);
+/* ── Score counter flash ──────────────────────────────────────────────────── */
+@keyframes score-pop {
+  0%   { transform: scale(1);    color: inherit; }
+  30%  { transform: scale(1.15); color: hsl(45 100% 60%); text-shadow: 0 0 12px hsl(45 100% 60%); }
+  100% { transform: scale(1);    color: inherit; }
+}
+.score-pop { animation: score-pop 0.5s ease-out; }
+
+/* ── Pixel card hover ─────────────────────────────────────────────────────── */
+.card-lift {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+}
+.card-lift:hover {
+  transform: translateY(-2px);
+  border-color: hsl(120 60% 25%);
+  box-shadow: 0 4px 20px hsl(120 100% 50% / 0.1),
+              0 0 0 1px hsl(120 60% 25%);
+}
+
+/* ── Value classes ────────────────────────────────────────────────────────── */
+.value-up      { color: hsl(var(--color-up));      text-shadow: 0 0 6px hsl(120 100% 50% / 0.5); }
+.value-down    { color: hsl(var(--color-down));    text-shadow: 0 0 6px hsl(0 90% 55% / 0.4); }
+.value-neutral { color: hsl(var(--color-neutral)); }
+.value-edge    { color: hsl(var(--color-edge));    text-shadow: 0 0 6px hsl(45 100% 55% / 0.5); }
+
+/* ── Gradient badge ───────────────────────────────────────────────────────── */
+.badge-edge {
+  background: hsl(45 100% 55% / 0.1);
+  border: 1px solid hsl(45 100% 55% / 0.4);
+  color: hsl(45 100% 55%);
+  box-shadow: 0 0 6px hsl(45 100% 55% / 0.2);
+}
+
+/* ── Terminal input style ─────────────────────────────────────────────────── */
+.terminal-input {
+  background: hsl(220 20% 4%);
+  border: 1px solid hsl(120 60% 20%);
+  color: hsl(120 100% 70%);
+  font-family: var(--font-mono);
+  border-radius: 2px;
+  caret-color: hsl(120 100% 60%);
+}
+.terminal-input:focus {
+  outline: none;
+  border-color: hsl(120 100% 50%);
+  box-shadow: 0 0 0 1px hsl(120 100% 50% / 0.3),
+              0 0 12px hsl(120 100% 50% / 0.15);
+}
+.terminal-input::placeholder {
+  color: hsl(120 40% 25%);
+}
+
+/* ── Retro button ─────────────────────────────────────────────────────────── */
+.btn-retro {
+  background: transparent;
+  border: 2px solid hsl(120 100% 50%);
+  color: hsl(120 100% 60%);
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 8px 16px;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.1s ease;
+  box-shadow: 0 0 8px hsl(120 100% 50% / 0.2),
+              inset 0 0 8px hsl(120 100% 50% / 0.05);
+}
+.btn-retro:hover {
+  background: hsl(120 100% 50% / 0.1);
+  box-shadow: 0 0 16px hsl(120 100% 50% / 0.4),
+              inset 0 0 16px hsl(120 100% 50% / 0.1);
+  text-shadow: 0 0 8px hsl(120 100% 60%);
+}
+.btn-retro:active { transform: scale(0.97); }
+.btn-retro:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.btn-retro-amber {
+  border-color: hsl(45 100% 55%);
+  color: hsl(45 100% 65%);
+  box-shadow: 0 0 8px hsl(45 100% 55% / 0.2),
+              inset 0 0 8px hsl(45 100% 55% / 0.05);
+}
+.btn-retro-amber:hover {
+  background: hsl(45 100% 55% / 0.1);
+  box-shadow: 0 0 16px hsl(45 100% 55% / 0.4),
+              inset 0 0 16px hsl(45 100% 55% / 0.1);
+  text-shadow: 0 0 8px hsl(45 100% 65%);
+}
+
+.btn-retro-red {
+  border-color: hsl(0 90% 55%);
+  color: hsl(0 90% 70%);
+}
+.btn-retro-red:hover {
+  background: hsl(0 90% 55% / 0.1);
+  box-shadow: 0 0 16px hsl(0 90% 55% / 0.4);
+}
+
+/* ── Pixel stat box ───────────────────────────────────────────────────────── */
+.stat-box {
+  background: hsl(220 18% 6%);
+  border: 1px solid hsl(120 40% 15%);
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+}
+.stat-box::after {
+  content: attr(data-label);
+  position: absolute;
+  top: 4px; left: 6px;
+  font-family: var(--font-pixel);
+  font-size: 6px;
+  color: hsl(120 40% 35%);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ── Retro table ──────────────────────────────────────────────────────────── */
+.retro-table { border-collapse: collapse; width: 100%; }
+.retro-table th {
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: hsl(120 50% 35%);
+  padding: 8px 12px;
+  border-bottom: 1px solid hsl(120 40% 15%);
+  text-align: left;
+}
+.retro-table td {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: hsl(120 80% 65%);
+  padding: 8px 12px;
+  border-bottom: 1px solid hsl(120 20% 10%);
+}
+.retro-table tr:hover td { background: hsl(120 100% 50% / 0.03); }
+
+/* ── Console / terminal log line ──────────────────────────────────────────── */
+.console-line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: hsl(120 70% 55%);
+  line-height: 1.6;
+  padding: 2px 0;
+}
+.console-line .prefix { color: hsl(45 100% 55%); margin-right: 8px; }
+.console-line .error  { color: hsl(0 90% 60%); }
+.console-line .warn   { color: hsl(40 100% 55%); }
+.console-line .dim    { color: hsl(120 30% 35%); }
+
+/* ── Pixel separator ──────────────────────────────────────────────────────── */
+.px-sep {
+  border: none;
+  border-top: 1px dashed hsl(120 30% 15%);
+  margin: 0;
+}
+
+/* ── XP / progress bar (amber) ────────────────────────────────────────────── */
+.xp-bar {
+  height: 6px;
+  background: hsl(220 15% 10%);
+  border: 1px solid hsl(45 60% 20%);
+  border-radius: 0;
+  overflow: hidden;
+}
+.xp-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, hsl(30 100% 40%), hsl(45 100% 60%));
+  box-shadow: 0 0 6px hsl(45 100% 55% / 0.5);
+  transition: width 0.5s ease;
+}
+
+/* ── Nav item active pixel underline ──────────────────────────────────────── */
+.nav-active {
+  position: relative;
+}
+.nav-active::before {
+  content: "▶";
+  position: absolute;
+  left: -4px;
+  color: hsl(120 100% 50%);
+  font-size: 8px;
+  line-height: 1;
+  top: 50%;
+  transform: translateY(-50%);
+  text-shadow: 0 0 8px hsl(120 100% 50%);
+}
+
+/* ── INSERT COIN animation ────────────────────────────────────────────────── */
+@keyframes insert-coin {
+  0%, 100% { opacity: 1; }
+  49%       { opacity: 1; }
+  50%       { opacity: 0; }
+  99%       { opacity: 0; }
+}
+.insert-coin { animation: insert-coin 1.2s step-start infinite; }
+
+/* ── Matrix / rain character effect (used in bg) ──────────────────────────── */
+@keyframes matrix-drop {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 0.3; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+
+/* ── shadcn overrides for retro feel ──────────────────────────────────────── */
+/* Remove border-radius from cards */
+.rounded-xl, .rounded-2xl, .rounded-lg, .rounded-md {
+  border-radius: 2px !important;
+}
+.rounded-full { border-radius: 2px !important; }
+
+/* Override shadcn card */
+[data-slot="card"] {
+  border-radius: 2px !important;
+  border-color: hsl(120 40% 15%);
+  box-shadow: inset 0 1px 0 hsl(120 30% 12% / 0.5);
+}
+
+/* Override shadcn button */
+[data-slot="button"] {
+  font-family: var(--font-pixel) !important;
+  font-size: 8px !important;
+  letter-spacing: 0.05em;
+  border-radius: 2px !important;
+  text-transform: uppercase;
+}
+
+/* Override shadcn badge */
+[data-slot="badge"] {
+  font-family: var(--font-pixel) !important;
+  font-size: 7px !important;
+  border-radius: 2px !important;
+  letter-spacing: 0.05em;
+}
+
+/* ── Tailwind color aliases via CSS vars ──────────────────────────────────── */
+.text-teal  { color: hsl(var(--color-teal)); }
+.text-up    { color: hsl(var(--color-up)); }
+.text-down  { color: hsl(var(--color-down)); }
+.text-edge  { color: hsl(var(--color-edge)); }
+.bg-teal    { background-color: hsl(var(--color-teal)); }
+
+/* ── Misc ─────────────────────────────────────────────────────────────────── */
+/* Ensure monospace numbers everywhere */
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* CRT text green override for headings */
+h1, h2, h3, h4 {
+  font-family: var(--font-pixel);
+  color: hsl(120 100% 65%);
+  text-shadow: 0 0 10px hsl(120 100% 50% / 0.4);
 }

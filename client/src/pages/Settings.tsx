@@ -1,17 +1,11 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
-import { Badge } from "@/components/ui/badge";
 import { useForm } from "react-hook-form";
-import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from "@/components/ui/form";
+import { Form, FormField, FormItem, FormControl, FormMessage } from "@/components/ui/form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Settings2, Shield, Zap, DollarSign, CheckCircle, AlertTriangle, Eye, EyeOff, Wifi, WifiOff, RefreshCw } from "lucide-react";
+import { RefreshCw, Eye, EyeOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
@@ -29,13 +23,105 @@ const settingsSchema = z.object({
 
 type SettingsForm = z.infer<typeof settingsSchema>;
 
+const retro = {
+  page: { padding: "1.25rem", display: "flex", flexDirection: "column" as const, gap: "1.25rem" },
+  panel: {
+    background: "hsl(220 20% 5%)",
+    border: "1px solid hsl(120 100% 55% / 0.25)",
+    borderRadius: "2px",
+    position: "relative" as const,
+  },
+  panelHeader: {
+    background: "hsl(120 100% 55% / 0.06)",
+    borderBottom: "1px solid hsl(120 100% 55% / 0.2)",
+    padding: "0.5rem 0.875rem",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  panelTitle: {
+    fontFamily: "var(--font-pixel)",
+    fontSize: "0.55rem",
+    color: "hsl(120 100% 55%)",
+    letterSpacing: "0.08em",
+  },
+  panelBody: { padding: "0.875rem" },
+  label: {
+    fontFamily: "var(--font-pixel)",
+    fontSize: "0.5rem",
+    color: "hsl(120 100% 55% / 0.7)",
+    letterSpacing: "0.1em",
+    textTransform: "uppercase" as const,
+    display: "block",
+    marginBottom: "0.375rem",
+  },
+  input: {
+    width: "100%",
+    background: "hsl(220 20% 3%)",
+    border: "1px solid hsl(120 100% 55% / 0.3)",
+    borderRadius: "2px",
+    padding: "0.45rem 0.625rem",
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.72rem",
+    color: "hsl(120 100% 55%)",
+    outline: "none",
+    boxSizing: "border-box" as const,
+  },
+  row: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.35rem" },
+  valueTag: {
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.75rem",
+    color: "hsl(45 100% 55%)",
+    background: "hsl(45 100% 55% / 0.08)",
+    border: "1px solid hsl(45 100% 55% / 0.3)",
+    borderRadius: "2px",
+    padding: "0.1rem 0.4rem",
+  },
+  hint: {
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.6rem",
+    color: "hsl(120 100% 55% / 0.45)",
+    marginTop: "0.35rem",
+    lineHeight: 1.6,
+  },
+  divider: { borderColor: "hsl(120 100% 55% / 0.1)", margin: "0.75rem 0" },
+  btn: {
+    width: "100%",
+    padding: "0.65rem",
+    background: "transparent",
+    border: "2px solid hsl(120 100% 55%)",
+    borderRadius: "2px",
+    color: "hsl(120 100% 55%)",
+    fontFamily: "var(--font-pixel)",
+    fontSize: "0.55rem",
+    letterSpacing: "0.1em",
+    cursor: "pointer",
+    textTransform: "uppercase" as const,
+    transition: "all 0.15s",
+  },
+};
+
+// Corner accents for retro panels
+function CornerAccents({ color = "hsl(120 100% 55%)" }: { color?: string }) {
+  const s = (pos: any) => ({
+    position: "absolute" as const, width: 8, height: 8, ...pos,
+  });
+  return (
+    <>
+      <div style={{ ...s({ top: -1, left: -1 }), borderTop: `2px solid ${color}`, borderLeft: `2px solid ${color}` }} />
+      <div style={{ ...s({ top: -1, right: -1 }), borderTop: `2px solid ${color}`, borderRight: `2px solid ${color}` }} />
+      <div style={{ ...s({ bottom: -1, left: -1 }), borderBottom: `2px solid ${color}`, borderLeft: `2px solid ${color}` }} />
+      <div style={{ ...s({ bottom: -1, right: -1 }), borderBottom: `2px solid ${color}`, borderRight: `2px solid ${color}` }} />
+    </>
+  );
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const [showSecret, setShowSecret] = useState(false);
 
-  const { data: settings, isLoading } = useQuery({ queryKey: ["/api/settings"] });
+  const { data: settings } = useQuery({ queryKey: ["/api/settings"] });
 
-  // Fetch real Alpaca account info
   const { data: alpacaData, isLoading: alpacaLoading, refetch: refetchAlpaca } = useQuery({
     queryKey: ["/api/alpaca/account"],
     queryFn: () => apiRequest("GET", "/api/alpaca/account").then(r => r.json()),
@@ -57,7 +143,6 @@ export default function Settings() {
     },
   });
 
-  // Populate form when settings load
   useEffect(() => {
     if (settings) {
       const s: any = settings;
@@ -77,7 +162,6 @@ export default function Settings() {
   const saveMutation = useMutation({
     mutationFn: (data: SettingsForm) => {
       const payload: any = { ...data };
-      // Don't overwrite secret if left blank (shows ••••)
       if (!payload.alpacaApiSecret || payload.alpacaApiSecret === "••••••••••••") {
         delete payload.alpacaApiSecret;
       }
@@ -87,7 +171,6 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
       queryClient.invalidateQueries({ queryKey: ["/api/alpaca/account"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      // Refetch Alpaca data immediately after save
       setTimeout(() => refetchAlpaca(), 500);
       toast({ title: "Settings saved", description: "Syncing balance from Alpaca..." });
     },
@@ -96,7 +179,6 @@ export default function Settings() {
 
   const s: any = settings || {};
   const hasApiKey = s.alpacaApiKey && s.alpacaApiKey.length > 0;
-
   const alpaca: any = alpacaData || {};
   const alpacaConnected = alpaca.ok === true;
   const alpacaIsLive = alpaca.isLive === true;
@@ -109,108 +191,106 @@ export default function Settings() {
   const startingBal = form.watch("startingBalance") || 100;
   const maxBets = form.watch("maxBetsPerDay") || 50;
 
+  const statusColor = alpacaConnected
+    ? alpacaIsLive ? "hsl(120 100% 55%)" : "hsl(45 100% 55%)"
+    : hasApiKey ? "hsl(45 100% 55%)" : "hsl(0 90% 55%)";
+
+  const statusText = alpacaConnected
+    ? `[ ${alpacaIsLive ? "LIVE" : "PAPER"} ] ALPACA UPLINK ESTABLISHED`
+    : hasApiKey ? "[ VERIFYING ] KEYS SAVED — AWAITING AUTH"
+    : "[ OFFLINE ] NO UPLINK CONFIGURED";
+
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-800 text-foreground tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Configure your Alpaca connection and bot parameters</p>
+    <div style={retro.page}>
+      {/* Page header */}
+      <div style={{ borderBottom: "1px solid hsl(120 100% 55% / 0.15)", paddingBottom: "0.75rem" }}>
+        <div style={{ fontFamily: "var(--font-pixel)", fontSize: "0.8rem", color: "hsl(120 100% 55%)", letterSpacing: "0.1em" }}>
+          ⚙ SYSTEM.CONFIG
+        </div>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: "hsl(120 100% 55% / 0.5)", marginTop: "0.25rem" }}>
+          CONFIGURE ALPACA UPLINK AND BOT PARAMETERS
+        </div>
       </div>
 
-      {/* Full connection status panel */}
+      {/* Connection status component */}
       <ConnectionStatus refetchInterval={30000} />
 
       <Form {...form}>
-        <form onSubmit={form.handleSubmit((d) => saveMutation.mutate(d))} className="space-y-6">
+        <form onSubmit={form.handleSubmit((d) => saveMutation.mutate(d))} style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
 
-          {/* Connection Status */}
-          <div className={`p-4 rounded-xl border ${
-            alpacaConnected
-              ? alpacaIsLive ? "border-up/25 bg-up/8" : "border-edge/25 bg-edge/8"
-              : hasApiKey ? "border-edge/25 bg-edge/8" : "border-border bg-secondary/50"
-          }`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {alpacaConnected ? (
-                  <Wifi size={16} className={alpacaIsLive ? "text-up" : "text-edge"} />
-                ) : hasApiKey ? (
-                  <AlertTriangle size={16} className="text-edge" />
-                ) : (
-                  <WifiOff size={16} className="text-muted-foreground" />
-                )}
-                <div>
-                  <p className={`text-sm font-medium ${
-                    alpacaConnected ? (alpacaIsLive ? "text-up" : "text-edge") : hasApiKey ? "text-edge" : "text-muted-foreground"
-                  }`}>
-                    {alpacaConnected
-                      ? `Alpaca ${alpacaIsLive ? "Live" : "Paper"} Account`
-                      : hasApiKey ? "Keys saved — verifying..."
-                      : "Alpaca Not Connected"}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {alpacaConnected
-                      ? `Status: ${alpaca.account?.status || "ACTIVE"} · ${alpaca.account?.currency || "USD"}`
-                      : hasApiKey ? "Enter your secret key and save to connect."
-                      : "Enter your Alpaca API keys below to enable the bot."}
-                  </p>
-                </div>
-              </div>
+          {/* Alpaca status terminal readout */}
+          <div style={{ ...retro.panel, borderColor: `${statusColor}40` }}>
+            <CornerAccents color={statusColor} />
+            <div style={{ ...retro.panelHeader, borderBottomColor: `${statusColor}30` }}>
+              <span style={{ ...retro.panelTitle, color: statusColor }}>▸ ALPACA UPLINK STATUS</span>
               <button
                 type="button"
                 onClick={() => refetchAlpaca()}
-                className="text-muted-foreground hover:text-foreground p-1 rounded"
+                style={{ background: "none", border: "none", cursor: "pointer", color: statusColor, padding: 0 }}
                 title="Refresh Alpaca connection"
               >
-                <RefreshCw size={13} className={alpacaLoading ? "animate-spin" : ""} />
+                <RefreshCw size={11} style={{ display: "block" }} className={alpacaLoading ? "animate-spin" : ""} />
               </button>
             </div>
-
-            {/* Live balance breakdown */}
-            {alpacaConnected && (
-              <div className="mt-3 grid grid-cols-3 gap-3 pt-3 border-t border-border/50">
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground">Portfolio</p>
-                  <p className="text-sm font-display font-700 text-foreground mt-0.5">${alpacaPortfolio?.toFixed(2)}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground">Cash</p>
-                  <p className="text-sm font-display font-700 text-foreground mt-0.5">${alpacaCash?.toFixed(2)}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground">Buying Power</p>
-                  <p className={`text-sm font-display font-700 mt-0.5 ${
-                    alpacaIsLive ? "text-up" : "text-edge"
-                  }`}>${alpacaBuyingPower?.toFixed(2)}</p>
-                </div>
+            <div style={{ ...retro.panelBody, fontFamily: "var(--font-mono)", fontSize: "0.68rem" }}>
+              <div style={{ color: statusColor, marginBottom: "0.5rem" }}>
+                <span style={{ color: "hsl(120 100% 55% / 0.4)" }}>&gt; STATUS: </span>
+                {statusText}
               </div>
-            )}
 
-            {/* Error from Alpaca */}
-            {alpaca.ok === false && hasApiKey && (
-              <p className="mt-2 text-xs text-down">{alpaca.error}</p>
-            )}
+              {alpacaConnected && (
+                <>
+                  <div style={{ color: "hsl(120 100% 55% / 0.5)", marginBottom: "0.5rem", fontSize: "0.6rem" }}>
+                    ACCOUNT: {alpaca.account?.status || "ACTIVE"} · {alpaca.account?.currency || "USD"}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.5rem", marginTop: "0.5rem" }}>
+                    {[
+                      { label: "PORTFOLIO", value: `$${alpacaPortfolio?.toFixed(2)}`, color: "hsl(120 100% 55%)" },
+                      { label: "CASH", value: `$${alpacaCash?.toFixed(2)}`, color: "hsl(120 100% 55%)" },
+                      { label: "BUYING PWR", value: `$${alpacaBuyingPower?.toFixed(2)}`, color: alpacaIsLive ? "hsl(120 100% 55%)" : "hsl(45 100% 55%)" },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} style={{
+                        background: "hsl(220 20% 3%)",
+                        border: "1px solid hsl(120 100% 55% / 0.15)",
+                        borderRadius: "2px",
+                        padding: "0.5rem",
+                        textAlign: "center",
+                      }}>
+                        <div style={{ fontFamily: "var(--font-pixel)", fontSize: "0.42rem", color: "hsl(120 100% 55% / 0.5)", letterSpacing: "0.08em", marginBottom: "0.3rem" }}>{label}</div>
+                        <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color }}>{value}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {alpaca.ok === false && hasApiKey && (
+                <div style={{ color: "hsl(0 90% 55%)", fontSize: "0.6rem", marginTop: "0.5rem" }}>
+                  ERR: {alpaca.error}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Alpaca API */}
-          <Card className="bg-card border-border">
-            <CardHeader className="pb-4">
-              <CardTitle className="text-sm font-display font-700 flex items-center gap-2">
-                <Shield size={14} className="text-teal" />
-                Alpaca API Connection
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          {/* Alpaca API panel */}
+          <div style={retro.panel}>
+            <CornerAccents />
+            <div style={retro.panelHeader}>
+              <span style={retro.panelTitle}>▸ ALPACA UPLINK // API CREDENTIALS</span>
+            </div>
+            <div style={{ ...retro.panelBody, display: "flex", flexDirection: "column", gap: "0.875rem" }}>
               <FormField
                 control={form.control}
                 name="alpacaApiKey"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-xs text-muted-foreground uppercase tracking-wider">API Key</FormLabel>
+                    <span style={retro.label}>API KEY</span>
                     <FormControl>
-                      <Input
+                      <input
                         {...field}
                         data-testid="input-alpaca-key"
                         placeholder="PKxxxxxxxxxxxxxxxxxxxxxxxx"
-                        className="bg-secondary border-border font-mono text-sm"
+                        style={retro.input}
                       />
                     </FormControl>
                     <FormMessage />
@@ -222,22 +302,22 @@ export default function Settings() {
                 name="alpacaApiSecret"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-xs text-muted-foreground uppercase tracking-wider">Secret Key</FormLabel>
+                    <span style={retro.label}>SECRET KEY</span>
                     <FormControl>
-                      <div className="relative">
-                        <Input
+                      <div style={{ position: "relative" }}>
+                        <input
                           {...field}
                           data-testid="input-alpaca-secret"
                           type={showSecret ? "text" : "password"}
                           placeholder="Leave blank to keep existing secret"
-                          className="bg-secondary border-border font-mono text-sm pr-10"
+                          style={{ ...retro.input, paddingRight: "2rem" }}
                         />
                         <button
                           type="button"
                           onClick={() => setShowSecret(!showSecret)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          style={{ position: "absolute", right: "0.5rem", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "hsl(120 100% 55% / 0.6)", padding: 0 }}
                         >
-                          {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+                          {showSecret ? <EyeOff size={12} /> : <Eye size={12} />}
                         </button>
                       </div>
                     </FormControl>
@@ -249,92 +329,83 @@ export default function Settings() {
                 name="polymarketWallet"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-xs text-muted-foreground uppercase tracking-wider">Polymarket Wallet (optional)</FormLabel>
+                    <span style={retro.label}>POLYMARKET WALLET (OPTIONAL)</span>
                     <FormControl>
-                      <Input
+                      <input
                         {...field}
                         data-testid="input-wallet"
                         placeholder="0x... your Polygon wallet address"
-                        className="bg-secondary border-border font-mono text-sm"
+                        style={retro.input}
                       />
                     </FormControl>
                   </FormItem>
                 )}
               />
-              <p className="text-xs text-muted-foreground">
-                Keys are stored locally in memory only. Never sent to any third party. Get your Alpaca keys at{" "}
-                <a href="https://alpaca.markets" target="_blank" rel="noopener" className="text-teal underline">alpaca.markets</a>.
-              </p>
-            </CardContent>
-          </Card>
+              <div style={{ ...retro.hint, borderLeft: "2px solid hsl(120 100% 55% / 0.2)", paddingLeft: "0.5rem" }}>
+                &gt; Keys stored locally in memory only. Never sent to 3rd parties.{" "}
+                <a href="https://alpaca.markets" target="_blank" rel="noopener" style={{ color: "hsl(175 90% 55%)", textDecoration: "none" }}>alpaca.markets ↗</a>
+              </div>
+            </div>
+          </div>
 
-          {/* Starting Balance */}
-          <Card className="bg-card border-border">
-            <CardHeader className="pb-4">
-              <CardTitle className="text-sm font-display font-700 flex items-center gap-2">
-                <DollarSign size={14} className="text-teal" />
-                Capital Configuration
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-5">
+          {/* Capital config */}
+          <div style={retro.panel}>
+            <CornerAccents color="hsl(45 100% 55%)" />
+            <div style={{ ...retro.panelHeader, borderBottomColor: "hsl(45 100% 55% / 0.2)" }}>
+              <span style={{ ...retro.panelTitle, color: "hsl(45 100% 55%)" }}>▸ CAPITAL CONFIG</span>
+            </div>
+            <div style={retro.panelBody}>
               <FormField
                 control={form.control}
                 name="startingBalance"
                 render={({ field }) => (
                   <FormItem>
-                    <div className="flex items-center justify-between">
-                      <FormLabel className="text-xs text-muted-foreground uppercase tracking-wider">Starting Balance (USDC)</FormLabel>
-                      <span className="text-sm font-display font-700 text-teal">${field.value}</span>
+                    <div style={retro.row}>
+                      <span style={{ ...retro.label, marginBottom: 0 }}>STARTING BALANCE (USDC)</span>
+                      <span style={retro.valueTag}>${field.value}</span>
                     </div>
                     <FormControl>
-                      <Slider
-                        min={50} max={10000} step={50}
-                        value={[field.value]}
-                        onValueChange={([v]) => field.onChange(v)}
-                        className="mt-2"
-                      />
+                      <Slider min={50} max={10000} step={50} value={[field.value]} onValueChange={([v]) => field.onChange(v)} className="mt-2" />
                     </FormControl>
-                    <p className="text-xs text-muted-foreground">Set this to your actual starting USDC balance for accurate PNL tracking.</p>
+                    <div style={retro.hint}>&gt; Set to your actual USDC starting balance for accurate PNL tracking.</div>
                   </FormItem>
                 )}
               />
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
-          {/* Bot Parameters */}
-          <Card className="bg-card border-border">
-            <CardHeader className="pb-4">
-              <CardTitle className="text-sm font-display font-700 flex items-center gap-2">
-                <Zap size={14} className="text-teal" />
-                Bot Parameters
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
+          {/* Bot parameters */}
+          <div style={retro.panel}>
+            <CornerAccents color="hsl(175 90% 55%)" />
+            <div style={{ ...retro.panelHeader, borderBottomColor: "hsl(175 90% 55% / 0.2)" }}>
+              <span style={{ ...retro.panelTitle, color: "hsl(175 90% 55%)" }}>▸ BOT PARAMETERS</span>
+            </div>
+            <div style={{ ...retro.panelBody, display: "flex", flexDirection: "column", gap: "1rem" }}>
 
-              {/* Bet Size */}
+              {/* Bet size */}
               <FormField
                 control={form.control}
                 name="betSize"
                 render={({ field }) => (
                   <FormItem>
-                    <div className="flex items-center justify-between">
-                      <FormLabel className="text-xs text-muted-foreground uppercase tracking-wider">Bet Size (USDC per trade)</FormLabel>
-                      <span className="text-sm font-display font-700 text-foreground">${field.value}</span>
+                    <div style={retro.row}>
+                      <span style={{ ...retro.label, marginBottom: 0 }}>BET SIZE (USDC/TRADE)</span>
+                      <span style={retro.valueTag}>${field.value}</span>
                     </div>
                     <FormControl>
-                      <Slider min={1} max={50} step={1} value={[field.value]} onValueChange={([v]) => field.onChange(v)} className="mt-2" />
+                      <Slider min={1} max={50} step={1} value={[field.value]} onValueChange={([v]) => field.onChange(v)} className="mt-1" />
                     </FormControl>
-                    <p className="text-xs text-muted-foreground">
-                      = {((betSize / startingBal) * 100).toFixed(1)}% of starting balance.{" "}
-                      <span className={`font-medium ${((betSize / startingBal) * 100) <= 2 ? "text-up" : "text-edge"}`}>
-                        {((betSize / startingBal) * 100) <= 2 ? "✓ Safe (≤2%)" : "⚠ Above 2% — consider reducing"}
+                    <div style={retro.hint}>
+                      &gt; {((betSize / startingBal) * 100).toFixed(1)}% of starting balance.{" "}
+                      <span style={{ color: ((betSize / startingBal) * 100) <= 2 ? "hsl(120 100% 55%)" : "hsl(45 100% 55%)" }}>
+                        {((betSize / startingBal) * 100) <= 2 ? "✓ SAFE (≤2%)" : "⚠ ABOVE 2% — CONSIDER REDUCING"}
                       </span>
-                    </p>
+                    </div>
                   </FormItem>
                 )}
               />
 
-              <Separator className="bg-border" />
+              <hr style={retro.divider} />
 
               {/* Max bets per day */}
               <FormField
@@ -342,19 +413,19 @@ export default function Settings() {
                 name="maxBetsPerDay"
                 render={({ field }) => (
                   <FormItem>
-                    <div className="flex items-center justify-between">
-                      <FormLabel className="text-xs text-muted-foreground uppercase tracking-wider">Max Bets Per Day</FormLabel>
-                      <span className="text-sm font-display font-700 text-foreground">{field.value}</span>
+                    <div style={retro.row}>
+                      <span style={{ ...retro.label, marginBottom: 0 }}>MAX BETS / DAY</span>
+                      <span style={retro.valueTag}>{field.value}</span>
                     </div>
                     <FormControl>
-                      <Slider min={5} max={200} step={5} value={[field.value]} onValueChange={([v]) => field.onChange(v)} className="mt-2" />
+                      <Slider min={5} max={200} step={5} value={[field.value]} onValueChange={([v]) => field.onChange(v)} className="mt-1" />
                     </FormControl>
-                    <p className="text-xs text-muted-foreground">Max daily exposure: ${betSize * maxBets} USDC</p>
+                    <div style={retro.hint}>&gt; Max daily exposure: ${betSize * maxBets} USDC</div>
                   </FormItem>
                 )}
               />
 
-              <Separator className="bg-border" />
+              <hr style={retro.divider} />
 
               {/* Daily stop loss */}
               <FormField
@@ -362,49 +433,59 @@ export default function Settings() {
                 name="dailyStopLossPct"
                 render={({ field }) => (
                   <FormItem>
-                    <div className="flex items-center justify-between">
-                      <FormLabel className="text-xs text-muted-foreground uppercase tracking-wider">Daily Stop Loss</FormLabel>
-                      <Badge variant="outline" className="text-xs text-down border-down/30">{field.value}% = -${((startingBal * field.value) / 100).toFixed(0)}</Badge>
+                    <div style={retro.row}>
+                      <span style={{ ...retro.label, marginBottom: 0 }}>DAILY STOP LOSS</span>
+                      <span style={{ ...retro.valueTag, color: "hsl(0 90% 55%)", background: "hsl(0 90% 55% / 0.08)", border: "1px solid hsl(0 90% 55% / 0.3)" }}>
+                        {field.value}% = -${((startingBal * field.value) / 100).toFixed(0)}
+                      </span>
                     </div>
                     <FormControl>
-                      <Slider min={5} max={30} step={1} value={[field.value]} onValueChange={([v]) => field.onChange(v)} className="mt-2" />
+                      <Slider min={5} max={30} step={1} value={[field.value]} onValueChange={([v]) => field.onChange(v)} className="mt-1" />
                     </FormControl>
-                    <p className="text-xs text-muted-foreground">Bot auto-stops if you lose more than this % in one day. Recommended: 15%.</p>
+                    <div style={retro.hint}>&gt; Bot auto-stops if daily loss exceeds this %. Recommended: 15%.</div>
                   </FormItem>
                 )}
               />
 
-              <Separator className="bg-border" />
+              <hr style={retro.divider} />
 
-              {/* Min edge % */}
+              {/* Min edge */}
               <FormField
                 control={form.control}
                 name="minEdgePct"
                 render={({ field }) => (
                   <FormItem>
-                    <div className="flex items-center justify-between">
-                      <FormLabel className="text-xs text-muted-foreground uppercase tracking-wider">Minimum Edge to Bet</FormLabel>
-                      <span className="text-sm font-display font-700 text-edge">{field.value}%</span>
+                    <div style={retro.row}>
+                      <span style={{ ...retro.label, marginBottom: 0 }}>MIN EDGE TO BET</span>
+                      <span style={{ ...retro.valueTag, color: "hsl(45 100% 55%)", background: "hsl(45 100% 55% / 0.08)", border: "1px solid hsl(45 100% 55% / 0.3)" }}>
+                        {field.value}%
+                      </span>
                     </div>
                     <FormControl>
-                      <Slider min={1} max={15} step={0.5} value={[field.value]} onValueChange={([v]) => field.onChange(v)} className="mt-2" />
+                      <Slider min={1} max={15} step={0.5} value={[field.value]} onValueChange={([v]) => field.onChange(v)} className="mt-1" />
                     </FormControl>
-                    <p className="text-xs text-muted-foreground">Only bet when Polymarket odds diverge from BTC momentum by at least this amount. Recommended: 3–5%.</p>
+                    <div style={retro.hint}>&gt; Only bet when odds diverge from BTC momentum by at least this amount. Recommended: 3–5%.</div>
                   </FormItem>
                 )}
               />
+            </div>
+          </div>
 
-            </CardContent>
-          </Card>
-
-          <Button
+          {/* Save button */}
+          <button
             type="submit"
             disabled={saveMutation.isPending}
             data-testid="button-save-settings"
-            className="w-full bg-teal text-background hover:bg-teal/90 font-display font-700"
+            style={{
+              ...retro.btn,
+              ...(saveMutation.isPending ? { opacity: 0.5, cursor: "not-allowed" } : {}),
+            }}
+            onMouseEnter={(e) => { if (!saveMutation.isPending) { (e.target as HTMLButtonElement).style.background = "hsl(120 100% 55% / 0.1)"; } }}
+            onMouseLeave={(e) => { (e.target as HTMLButtonElement).style.background = "transparent"; }}
           >
-            {saveMutation.isPending ? "Saving..." : "Save Settings"}
-          </Button>
+            {saveMutation.isPending ? "[ SAVING... ]" : "[ SAVE CONFIG ]"}
+          </button>
+
         </form>
       </Form>
     </div>

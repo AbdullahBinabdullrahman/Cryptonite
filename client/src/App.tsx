@@ -1,7 +1,7 @@
 import { Switch, Route, Link, useLocation, Router } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import Dashboard from "@/pages/Dashboard";
 import Markets from "@/pages/Markets";
@@ -21,25 +21,26 @@ import {
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/",          icon: LayoutDashboard, label: "Dashboard"  },
-  { href: "/portfolio", icon: PieChart,        label: "Portfolio"  },
-  { href: "/markets",   icon: TrendingUp,      label: "Markets"    },
-  { href: "/trades",    icon: List,            label: "Trades"     },
-  { href: "/copy",      icon: Copy,            label: "Copy Trade" },
-  { href: "/settings",  icon: Settings2,       label: "Settings"   },
+  { href: "/",          icon: LayoutDashboard, label: "Dashboard",  code: "01" },
+  { href: "/portfolio", icon: PieChart,        label: "Portfolio",  code: "02" },
+  { href: "/markets",   icon: TrendingUp,      label: "Markets",    code: "03" },
+  { href: "/trades",    icon: List,            label: "Trades",     code: "04" },
+  { href: "/copy",      icon: Copy,            label: "Copy Trade", code: "05" },
+  { href: "/settings",  icon: Settings2,       label: "Config",     code: "06" },
 ];
 
-// ── Bot status pill ───────────────────────────────────────────────────────────
-function BotPill() {
+// ── Bot status display ────────────────────────────────────────────────────────
+function BotStatus() {
   const { data } = useQuery({ queryKey: ["/api/dashboard"], refetchInterval: 5000 });
   const d: any = data || {};
   const running = d.isRunning === true;
   const pnl = d.todayPnl ?? 0;
   return (
-    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-secondary/60 border border-border">
-      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${running ? "bg-up pulse-dot" : "bg-muted-foreground/40"}`} />
-      <span className={`text-[10px] font-medium ${running ? "text-up" : "text-muted-foreground"}`}>
-        {running ? `+$${pnl.toFixed(2)} today` : "Stopped"}
+    <div className="flex items-center gap-2 px-2 py-1" style={{ fontFamily: "var(--font-pixel)", fontSize: 7 }}>
+      <div className={`w-2 h-2 flex-shrink-0 ${running ? "bg-green-400 pulse-dot" : "bg-gray-600"}`}
+           style={{ boxShadow: running ? "0 0 6px #0f0" : "none" }} />
+      <span className={running ? "text-green-400" : "text-gray-500"} style={{ letterSpacing: "0.05em" }}>
+        {running ? `BOT:ON  +$${pnl.toFixed(2)}` : "BOT:OFF"}
       </span>
     </div>
   );
@@ -48,56 +49,105 @@ function BotPill() {
 // ── Desktop sidebar ───────────────────────────────────────────────────────────
 function Sidebar({ onClose }: { onClose?: () => void }) {
   const [location] = useLocation();
+
   return (
-    <div className="flex flex-col h-full">
-      {/* Logo */}
-      <div className="p-5 border-b border-border flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-teal/15 border border-teal/30 flex items-center justify-center glow-teal flex-shrink-0">
-            <Zap className="w-4 h-4 text-teal" />
-          </div>
+    <div className="flex flex-col h-full" style={{ background: "hsl(220 20% 4%)" }}>
+
+      {/* ── ASCII logo area ── */}
+      <div className="p-4 border-b" style={{ borderColor: "hsl(120 40% 12%)" }}>
+        <div className="flex items-center justify-between">
           <div>
-            <div className="font-display font-800 text-sm text-foreground tracking-tight">PolyBot</div>
-            <div className="text-[10px] text-muted-foreground">BTC Edge Trader</div>
+            {/* Pixel logo */}
+            <div className="flex items-center gap-2 mb-1">
+              <div
+                className="w-8 h-8 flex items-center justify-center flex-shrink-0"
+                style={{
+                  background: "hsl(220 20% 4%)",
+                  border: "2px solid hsl(120 100% 50% / 0.6)",
+                  boxShadow: "0 0 10px hsl(120 100% 50% / 0.4), inset 0 0 10px hsl(120 100% 50% / 0.1)"
+                }}
+              >
+                <Zap className="w-4 h-4" style={{ color: "hsl(120 100% 60%)", filter: "drop-shadow(0 0 4px #0f0)" }} />
+              </div>
+              <div>
+                <div style={{ fontFamily: "var(--font-pixel)", fontSize: 9, color: "hsl(120 100% 65%)", textShadow: "0 0 10px hsl(120 100% 50% / 0.6)", letterSpacing: "0.05em" }}>
+                  POLYBOT
+                </div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(45 100% 55%)", letterSpacing: "0.05em" }}>
+                  BTC EDGE v2.0
+                </div>
+              </div>
+            </div>
+            {/* System status line */}
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 40% 35%)" }}>
+              SYS: <span style={{ color: "hsl(120 100% 55%)" }}>ONLINE</span>
+              <span className="blink" style={{ color: "hsl(120 100% 55%)" }}>_</span>
+            </div>
           </div>
+          {onClose && (
+            <button onClick={onClose} className="md:hidden p-1" style={{ color: "hsl(120 40% 40%)" }}>
+              <X size={16} />
+            </button>
+          )}
         </div>
-        {/* Close button — mobile only */}
-        {onClose && (
-          <button onClick={onClose} className="md:hidden p-1 text-muted-foreground hover:text-foreground">
-            <X size={18} />
-          </button>
-        )}
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map(({ href, icon: Icon, label }) => {
+      {/* ── Nav ── */}
+      <nav className="flex-1 py-3 overflow-y-auto">
+        {/* Section label */}
+        <div className="px-4 mb-2" style={{ fontFamily: "var(--font-pixel)", fontSize: 6, color: "hsl(120 30% 30%)", letterSpacing: "0.1em" }}>
+          ▸ NAVIGATION
+        </div>
+
+        {NAV_ITEMS.map(({ href, icon: Icon, label, code }) => {
           const active = location === href;
           return (
             <Link
               key={href}
               href={href}
               onClick={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
-                active
-                  ? "bg-teal/15 text-teal border border-teal/20"
-                  : "text-muted-foreground hover:text-foreground hover:bg-secondary border border-transparent"
-              }`}
+              className="flex items-center gap-3 px-4 py-2.5 mx-2 mb-0.5 transition-all duration-100 relative"
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: active ? "hsl(120 100% 65%)" : "hsl(120 40% 40%)",
+                background: active ? "hsl(120 100% 50% / 0.07)" : "transparent",
+                border: active ? "1px solid hsl(120 60% 20%)" : "1px solid transparent",
+                letterSpacing: "0.05em",
+                boxShadow: active ? "0 0 12px hsl(120 100% 50% / 0.1), inset 0 0 12px hsl(120 100% 50% / 0.05)" : "none",
+              }}
             >
-              <Icon className="w-4 h-4 flex-shrink-0" />
-              {label}
+              {/* Active arrow */}
+              {active && (
+                <span style={{ position: "absolute", left: 4, color: "hsl(120 100% 55%)", fontSize: 8, textShadow: "0 0 8px hsl(120 100% 50%)" }}>▶</span>
+              )}
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: active ? "hsl(45 100% 55%)" : "hsl(120 25% 30%)", minWidth: 16 }}>
+                {code}
+              </span>
+              <Icon className="w-3.5 h-3.5 flex-shrink-0" style={{ filter: active ? "drop-shadow(0 0 4px hsl(120 100% 50%))" : "none" }} />
+              <span>{label.toUpperCase()}</span>
             </Link>
           );
         })}
       </nav>
 
-      {/* Bot status */}
-      <div className="p-3 mx-2 mb-2 rounded-xl bg-secondary/40 border border-border">
-        <BotPill />
+      {/* ── Bot status terminal box ── */}
+      <div
+        className="mx-3 mb-3 p-3"
+        style={{
+          background: "hsl(220 20% 3%)",
+          border: "1px solid hsl(120 40% 12%)",
+          boxShadow: "inset 0 0 12px hsl(120 100% 50% / 0.03)"
+        }}
+      >
+        <div style={{ fontFamily: "var(--font-pixel)", fontSize: 6, color: "hsl(120 30% 30%)", letterSpacing: "0.1em", marginBottom: 6 }}>
+          ▸ SYSTEM STATUS
+        </div>
+        <BotStatus />
       </div>
 
       {/* Attribution */}
-      <div className="p-4 border-t border-border">
+      <div className="px-4 pb-4" style={{ borderTop: "1px dashed hsl(120 30% 12%)", paddingTop: 8 }}>
         <PerplexityAttribution />
       </div>
     </div>
@@ -107,20 +157,32 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
 // ── Mobile top bar ────────────────────────────────────────────────────────────
 function MobileTopBar({ onMenu }: { onMenu: () => void }) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 bg-card border-b border-border md:hidden">
+    <div
+      className="flex items-center justify-between px-4 py-2 md:hidden"
+      style={{
+        background: "hsl(220 20% 4%)",
+        borderBottom: "1px solid hsl(120 40% 12%)"
+      }}
+    >
       <div className="flex items-center gap-2">
-        <div className="w-7 h-7 rounded-lg bg-teal/15 border border-teal/30 flex items-center justify-center">
-          <Zap className="w-3.5 h-3.5 text-teal" />
+        <div
+          className="w-6 h-6 flex items-center justify-center"
+          style={{ border: "1px solid hsl(120 100% 50% / 0.5)", boxShadow: "0 0 8px hsl(120 100% 50% / 0.3)" }}
+        >
+          <Zap className="w-3 h-3" style={{ color: "hsl(120 100% 60%)" }} />
         </div>
-        <span className="font-display font-800 text-sm text-foreground">PolyBot</span>
+        <span style={{ fontFamily: "var(--font-pixel)", fontSize: 8, color: "hsl(120 100% 65%)", textShadow: "0 0 8px hsl(120 100% 50% / 0.5)" }}>
+          POLYBOT
+        </span>
       </div>
       <div className="flex items-center gap-2">
-        <BotPill />
+        <BotStatus />
         <button
           onClick={onMenu}
-          className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-secondary"
+          className="p-1.5 transition-colors"
+          style={{ border: "1px solid hsl(120 40% 15%)", color: "hsl(120 40% 50%)" }}
         >
-          <Menu size={18} />
+          <Menu size={16} />
         </button>
       </div>
     </div>
@@ -131,7 +193,13 @@ function MobileTopBar({ onMenu }: { onMenu: () => void }) {
 function MobileBottomNav() {
   const [location] = useLocation();
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-border md:hidden">
+    <nav
+      className="fixed bottom-0 left-0 right-0 z-50 md:hidden"
+      style={{
+        background: "hsl(220 20% 4%)",
+        borderTop: "1px solid hsl(120 40% 12%)"
+      }}
+    >
       <div className="flex items-center">
         {NAV_ITEMS.map(({ href, icon: Icon, label }) => {
           const active = location === href;
@@ -139,12 +207,16 @@ function MobileBottomNav() {
             <Link
               key={href}
               href={href}
-              className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 transition-colors ${
-                active ? "text-teal" : "text-muted-foreground"
-              }`}
+              className="flex-1 flex flex-col items-center gap-0.5 py-2 transition-colors"
+              style={{
+                color: active ? "hsl(120 100% 60%)" : "hsl(120 30% 35%)",
+                filter: active ? "drop-shadow(0 0 4px hsl(120 100% 50%))" : "none"
+              }}
             >
-              <Icon className="w-5 h-5" />
-              <span className="text-[9px] font-medium">{label}</span>
+              <Icon className="w-4 h-4" />
+              <span style={{ fontFamily: "var(--font-pixel)", fontSize: 6, letterSpacing: "0.05em" }}>
+                {label.toUpperCase().slice(0, 4)}
+              </span>
             </Link>
           );
         })}
@@ -153,62 +225,83 @@ function MobileBottomNav() {
   );
 }
 
-// ── AppShell (main UI) ───────────────────────────────────────────────────────────────────────
+// ── Scanline sweep overlay ─────────────────────────────────────────────────────
+function ScanlineSweep() {
+  return <div className="scanline-sweep pointer-events-none" />;
+}
+
+// ── AppShell (main UI) ─────────────────────────────────────────────────────────
 function AppShell() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-        <Router hook={useHashLocation}>
+    <div className="min-h-screen" style={{ background: "hsl(220 20% 4%)", color: "hsl(120 100% 75%)" }}>
+      <Router hook={useHashLocation}>
+        <ScanlineSweep />
 
-          {/* ── Desktop sidebar (hidden on mobile) ── */}
-          <aside className="hidden md:flex fixed left-0 top-0 h-full w-[220px] bg-card border-r border-border flex-col z-50">
-            <Sidebar />
-          </aside>
+        {/* ── Desktop sidebar ── */}
+        <aside
+          className="hidden md:flex fixed left-0 top-0 h-full flex-col z-50"
+          style={{
+            width: 220,
+            borderRight: "1px solid hsl(120 40% 12%)",
+            boxShadow: "4px 0 20px hsl(120 100% 50% / 0.04)"
+          }}
+        >
+          <Sidebar />
+        </aside>
 
-          {/* ── Mobile drawer overlay ── */}
-          {mobileMenuOpen && (
-            <div className="fixed inset-0 z-[60] md:hidden">
-              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
-              <aside className="absolute left-0 top-0 h-full w-[260px] bg-card border-r border-border flex flex-col shadow-2xl">
-                <Sidebar onClose={() => setMobileMenuOpen(false)} />
-              </aside>
-            </div>
-          )}
-
-          {/* ── Main content ── */}
-          <div className="md:ml-[220px] flex flex-col min-h-screen">
-
-            {/* Mobile top bar */}
-            <MobileTopBar onMenu={() => setMobileMenuOpen(true)} />
-
-            {/* Ticker */}
-            <LiveTicker />
-
-            {/* Page content — extra bottom padding on mobile for bottom nav */}
-            <main className="flex-1 pb-20 md:pb-0">
-              <Switch>
-                <Route path="/"          component={Dashboard}  />
-                <Route path="/portfolio" component={Portfolio}  />
-                <Route path="/markets"   component={Markets}    />
-                <Route path="/trades"    component={Trades}     />
-                <Route path="/copy"      component={CopyTrade}  />
-                <Route path="/settings"  component={Settings}   />
-                <Route component={NotFound} />
-              </Switch>
-            </main>
+        {/* ── Mobile drawer overlay ── */}
+        {mobileMenuOpen && (
+          <div className="fixed inset-0 z-[60] md:hidden">
+            <div
+              className="absolute inset-0"
+              style={{ background: "rgba(0,0,0,0.8)" }}
+              onClick={() => setMobileMenuOpen(false)}
+            />
+            <aside
+              className="absolute left-0 top-0 h-full flex flex-col shadow-2xl"
+              style={{
+                width: 240,
+                borderRight: "1px solid hsl(120 40% 12%)"
+              }}
+            >
+              <Sidebar onClose={() => setMobileMenuOpen(false)} />
+            </aside>
           </div>
+        )}
 
-          {/* Mobile bottom nav */}
-          <MobileBottomNav />
+        {/* ── Main content ── */}
+        <div className="md:ml-[220px] flex flex-col min-h-screen">
+          {/* Mobile top bar */}
+          <MobileTopBar onMenu={() => setMobileMenuOpen(true)} />
 
-        </Router>
-        <Toaster />
-      </div>
+          {/* Ticker */}
+          <LiveTicker />
+
+          {/* Page content */}
+          <main className="flex-1 pb-20 md:pb-0">
+            <Switch>
+              <Route path="/"          component={Dashboard}  />
+              <Route path="/portfolio" component={Portfolio}  />
+              <Route path="/markets"   component={Markets}    />
+              <Route path="/trades"    component={Trades}     />
+              <Route path="/copy"      component={CopyTrade}  />
+              <Route path="/settings"  component={Settings}   />
+              <Route component={NotFound} />
+            </Switch>
+          </main>
+        </div>
+
+        {/* Mobile bottom nav */}
+        <MobileBottomNav />
+      </Router>
+      <Toaster />
+    </div>
   );
 }
 
-// ── Auth gate (needs QueryClientProvider as parent) ──────────────────────────
+// ── Auth gate (needs QueryClientProvider as parent) ───────────────────────────
 function AuthGate() {
   const [authedEmail, setAuthedEmail] = useState<string | null>(null);
 
@@ -221,8 +314,22 @@ function AuthGate() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-teal/30 border-t-teal rounded-full animate-spin" />
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: "hsl(220 20% 4%)" }}
+      >
+        <div className="text-center">
+          <div
+            className="w-12 h-12 mx-auto mb-4 flex items-center justify-center"
+            style={{ border: "2px solid hsl(120 100% 50% / 0.5)", boxShadow: "0 0 20px hsl(120 100% 50% / 0.3)" }}
+          >
+            <Zap className="w-5 h-5 animate-pulse" style={{ color: "hsl(120 100% 60%)" }} />
+          </div>
+          <div style={{ fontFamily: "var(--font-pixel)", fontSize: 8, color: "hsl(120 60% 45%)", letterSpacing: "0.1em" }}>
+            LOADING SYS
+            <span className="blink">_</span>
+          </div>
+        </div>
       </div>
     );
   }
@@ -239,7 +346,7 @@ function AuthGate() {
   return <AppShell />;
 }
 
-// ── Root — QueryClientProvider wraps everything ───────────────────────────────
+// ── Root ─────────────────────────────────────────────────────────────────────
 function App() {
   return (
     <QueryClientProvider client={queryClient}>

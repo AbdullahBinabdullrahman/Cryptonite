@@ -55,10 +55,49 @@ function OtpInput({ length = 6, onComplete }: { length?: number; onComplete: (va
           value={d}
           onChange={e => handleChange(i, e.target.value)}
           onKeyDown={e => handleKeyDown(i, e)}
-          className={`w-11 h-14 text-center text-xl font-800 font-display rounded-xl border bg-secondary/40 text-foreground
-            transition-all duration-150 outline-none focus:ring-2 focus:ring-teal/50 focus:border-teal
-            ${d ? "border-teal/60 bg-teal/8" : "border-border"}`}
+          className="w-10 h-12 text-center text-lg font-bold outline-none transition-all duration-150"
+          style={{
+            fontFamily: "var(--font-pixel)",
+            fontSize: 14,
+            background: "hsl(220 20% 3%)",
+            border: d ? "2px solid hsl(120 100% 50% / 0.8)" : "2px solid hsl(120 40% 18%)",
+            color: "hsl(120 100% 70%)",
+            boxShadow: d ? "0 0 10px hsl(120 100% 50% / 0.4), inset 0 0 8px hsl(120 100% 50% / 0.05)" : "none",
+            borderRadius: 0,
+            caretColor: "hsl(120 100% 60%)",
+          }}
         />
+      ))}
+    </div>
+  );
+}
+
+// ── Boot lines component ──────────────────────────────────────────────────────
+function BootLines() {
+  const lines = [
+    "> POLYBOT OS v2.0 LOADING...",
+    "> CHECKING NEURAL NETS... [OK]",
+    "> CONNECTING POLYMARKET... [OK]",
+    "> ALPACA BRIDGE... [OK]",
+    "> CLOB ENGINE... READY",
+    "> AUTHENTICATION REQUIRED_",
+  ];
+  return (
+    <div className="space-y-0.5 mb-6">
+      {lines.map((line, i) => (
+        <div
+          key={i}
+          className="boot-line"
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: i === lines.length - 1 ? "hsl(45 100% 55%)" : "hsl(120 60% 45%)",
+            letterSpacing: "0.03em",
+            animationDelay: `${i * 0.18}s`,
+          }}
+        >
+          {line}
+        </div>
       ))}
     </div>
   );
@@ -77,40 +116,30 @@ export default function Login({ onLogin }: LoginProps) {
   const [totpSetup, setTotpSetup]   = useState<{ secret: string; qrDataUrl: string } | null>(null);
   const [showSecret, setShowSecret] = useState(false);
   const [totpInput, setTotpInput]   = useState("");
-  // "otp" sub-mode: user chose to skip password and use OTP instead
   const [useOtpMode, setUseOtpMode] = useState(false);
 
-  // Countdown timer for resend
   useEffect(() => {
     if (countdown <= 0) return;
     const t = setInterval(() => setCountdown(c => c - 1), 1000);
     return () => clearInterval(t);
   }, [countdown]);
 
-  // ── Password login ─────────────────────────────────────────────────────────
   const loginWithPassword = async () => {
     if (!email.trim() || !password) return;
     setLoading(true);
     try {
-      const res  = await apiRequest("POST", "/api/auth/login", {
-        email: email.trim(),
-        password,
-      });
+      const res  = await apiRequest("POST", "/api/auth/login", { email: email.trim(), password });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Login failed");
-      if (data.totpRequired) {
-        setStep("totp");
-        return;
-      }
+      if (data.totpRequired) { setStep("totp"); return; }
       onLogin(data.email);
     } catch (e: any) {
-      toast({ title: "Login failed", description: e.message, variant: "destructive" });
+      toast({ title: "ACCESS DENIED", description: e.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Send OTP (fallback / no-password path) ─────────────────────────────────
   const sendOtp = async () => {
     if (!email.trim()) return;
     setLoading(true);
@@ -121,34 +150,28 @@ export default function Login({ onLogin }: LoginProps) {
       setPreviewUrl(data.previewUrl || null);
       setStep("otp");
       setCountdown(60);
-      toast({ title: "Code sent", description: `Check ${email}` });
+      toast({ title: "CODE TRANSMITTED", description: `Check ${email}` });
     } catch (e: any) {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
+      toast({ title: "TRANSMISSION ERROR", description: e.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Verify OTP ─────────────────────────────────────────────────────────────
   const verifyOtp = async (code: string) => {
     setLoading(true);
     try {
       const res  = await apiRequest("POST", "/api/auth/verify", { email: email.trim(), code });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Invalid code");
-      if (data.totpEnabled) {
-        setStep("totp");
-        setLoading(false);
-        return;
-      }
+      if (data.totpEnabled) { setStep("totp"); setLoading(false); return; }
       onLogin(data.email);
     } catch (e: any) {
-      toast({ title: "Invalid code", description: e.message, variant: "destructive" });
+      toast({ title: "INVALID TOKEN", description: e.message, variant: "destructive" });
       setLoading(false);
     }
   };
 
-  // ── Verify TOTP ────────────────────────────────────────────────────────────
   const verifyTotp = async (token: string) => {
     setLoading(true);
     try {
@@ -157,12 +180,11 @@ export default function Login({ onLogin }: LoginProps) {
       if (!res.ok) throw new Error(data.error || "Invalid code");
       onLogin(data.email);
     } catch (e: any) {
-      toast({ title: "Invalid code", description: e.message, variant: "destructive" });
+      toast({ title: "INVALID TOKEN", description: e.message, variant: "destructive" });
       setLoading(false);
     }
   };
 
-  // ── TOTP setup ─────────────────────────────────────────────────────────────
   const loadTotpSetup = async () => {
     setLoading(true);
     try {
@@ -185,7 +207,7 @@ export default function Login({ onLogin }: LoginProps) {
       const res  = await apiRequest("POST", "/api/auth/totp-enable", { token: totpInput });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      toast({ title: "Authenticator enabled", description: "Use your app to log in next time" });
+      toast({ title: "2FA ENABLED", description: "Authenticator armed and ready" });
       onLogin(email);
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
@@ -193,275 +215,387 @@ export default function Login({ onLogin }: LoginProps) {
     }
   };
 
-  // ── Layout ──────────────────────────────────────────────────────────────────
+  // ── Shared input style ──────────────────────────────────────────────────────
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    background: "hsl(220 20% 3%)",
+    border: "1px solid hsl(120 60% 18%)",
+    color: "hsl(120 100% 70%)",
+    fontFamily: "var(--font-mono)",
+    fontSize: 12,
+    padding: "8px 10px 8px 32px",
+    borderRadius: 0,
+    outline: "none",
+    letterSpacing: "0.03em",
+    caretColor: "hsl(120 100% 60%)",
+  };
+
+  const btnPrimary: React.CSSProperties = {
+    width: "100%",
+    background: "transparent",
+    border: "2px solid hsl(120 100% 50%)",
+    color: "hsl(120 100% 65%)",
+    fontFamily: "var(--font-pixel)",
+    fontSize: 9,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    padding: "10px 20px",
+    cursor: "pointer",
+    boxShadow: "0 0 12px hsl(120 100% 50% / 0.25), inset 0 0 12px hsl(120 100% 50% / 0.05)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 0,
+    transition: "all 0.1s ease",
+  };
+
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      {/* Background glow */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-teal/5 rounded-full blur-3xl" />
-        <div className="absolute top-2/3 left-1/3 w-[300px] h-[300px] bg-edge/5 rounded-full blur-3xl" />
+    <div
+      className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
+      style={{ background: "hsl(220 20% 4%)" }}
+    >
+      {/* Matrix-style bg dots */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-20" style={{ zIndex: 0 }}>
+        {[...Array(20)].map((_, i) => (
+          <div
+            key={i}
+            style={{
+              position: "absolute",
+              left: `${(i * 5.3) % 100}%`,
+              top: `${(i * 7.7) % 100}%`,
+              width: 1,
+              height: 1,
+              background: "hsl(120 100% 50%)",
+              boxShadow: "0 0 4px hsl(120 100% 50%)",
+              opacity: Math.random() * 0.5 + 0.2,
+            }}
+          />
+        ))}
       </div>
 
-      <div className="relative w-full max-w-sm">
-        {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-teal/15 border border-teal/30 glow-teal mb-4">
-            <Zap className="w-8 h-8 text-teal" />
+      {/* CRT corner decorations */}
+      {[
+        { top: 16, left: 16 },
+        { top: 16, right: 16 },
+        { bottom: 16, left: 16 },
+        { bottom: 16, right: 16 },
+      ].map((pos, i) => (
+        <div
+          key={i}
+          style={{
+            position: "fixed",
+            ...pos,
+            width: 20,
+            height: 20,
+            borderTop: i < 2 ? "2px solid hsl(120 60% 25%)" : "none",
+            borderBottom: i >= 2 ? "2px solid hsl(120 60% 25%)" : "none",
+            borderLeft: i % 2 === 0 ? "2px solid hsl(120 60% 25%)" : "none",
+            borderRight: i % 2 === 1 ? "2px solid hsl(120 60% 25%)" : "none",
+            pointerEvents: "none",
+            zIndex: 10,
+          }}
+        />
+      ))}
+
+      <div className="relative w-full max-w-sm" style={{ zIndex: 1 }}>
+        {/* ── Terminal header ── */}
+        <div className="text-center mb-6">
+          <div
+            className="inline-flex items-center justify-center w-16 h-16 mb-4"
+            style={{
+              border: "2px solid hsl(120 100% 50% / 0.7)",
+              boxShadow: "0 0 20px hsl(120 100% 50% / 0.4), inset 0 0 20px hsl(120 100% 50% / 0.08)",
+              background: "hsl(220 20% 4%)",
+            }}
+          >
+            <Zap className="w-8 h-8" style={{ color: "hsl(120 100% 60%)", filter: "drop-shadow(0 0 8px hsl(120 100% 50%))" }} />
           </div>
-          <h1 className="font-display text-2xl font-800 text-foreground tracking-tight">PolyBot</h1>
-          <p className="text-sm text-muted-foreground mt-1">BTC Edge Trader</p>
+
+          <div style={{ fontFamily: "var(--font-pixel)", fontSize: 14, color: "hsl(120 100% 65%)", textShadow: "0 0 16px hsl(120 100% 50% / 0.7)", letterSpacing: "0.1em" }}>
+            POLYBOT
+          </div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(45 100% 55%)", letterSpacing: "0.08em", marginTop: 2 }}>
+            SECURE TERMINAL ACCESS
+          </div>
         </div>
 
-        {/* Card */}
-        <div className="bg-card border border-border rounded-2xl p-6 shadow-xl shadow-black/20">
+        {/* ── Main panel ── */}
+        <div
+          style={{
+            background: "hsl(220 20% 5%)",
+            border: "1px solid hsl(120 60% 18%)",
+            boxShadow: "0 0 30px hsl(120 100% 50% / 0.08), inset 0 0 30px hsl(120 100% 50% / 0.02)",
+            padding: "0",
+          }}
+        >
+          {/* Panel title bar */}
+          <div
+            style={{
+              padding: "6px 16px",
+              borderBottom: "1px solid hsl(120 40% 12%)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              background: "hsl(220 20% 4%)",
+            }}
+          >
+            <div className="blink" style={{ width: 6, height: 6, background: "hsl(120 100% 50%)", boxShadow: "0 0 4px hsl(120 100% 50%)" }} />
+            <span style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: "hsl(120 40% 40%)", letterSpacing: "0.1em" }}>
+              {step === "credentials" ? "USER AUTHENTICATION" : step === "otp" ? "OTP VERIFICATION" : step === "totp" ? "2FA REQUIRED" : "2FA SETUP"}
+            </span>
+          </div>
 
-          {/* ── Credentials step (email + password) ── */}
-          {step === "credentials" && !useOtpMode && (
-            <div className="space-y-5">
-              <div>
-                <h2 className="text-base font-display font-700 text-foreground flex items-center gap-2">
-                  <Lock size={14} className="text-teal" />Sign in
-                </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Enter your email and password</p>
-              </div>
+          <div style={{ padding: "16px" }}>
+            {/* Boot lines (only on credential step) */}
+            {step === "credentials" && !useOtpMode && <BootLines />}
 
-              {/* Email */}
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">Email address</label>
-                <div className="relative">
-                  <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && document.getElementById("pw-input")?.focus()}
-                    placeholder="you@example.com"
-                    data-testid="input-email"
-                    className="w-full pl-9 pr-4 py-2.5 text-sm bg-secondary/40 border border-border rounded-xl text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal/40 focus:border-teal transition-all"
-                  />
+            {/* ── Credentials step ── */}
+            {step === "credentials" && !useOtpMode && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {/* Email */}
+                <div>
+                  <div style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: "hsl(120 40% 35%)", letterSpacing: "0.1em", marginBottom: 4 }}>
+                    USER_ID:
+                  </div>
+                  <div style={{ position: "relative" }}>
+                    <Mail size={12} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "hsl(120 40% 40%)" }} />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && document.getElementById("pw-input")?.focus()}
+                      placeholder="user@system.net"
+                      data-testid="input-email"
+                      style={inputStyle}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              {/* Password */}
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">Password</label>
-                <div className="relative">
-                  <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    id="pw-input"
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && loginWithPassword()}
-                    placeholder="••••••••"
-                    data-testid="input-password"
-                    className="w-full pl-9 pr-10 py-2.5 text-sm bg-secondary/40 border border-border rounded-xl text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal/40 focus:border-teal transition-all"
-                  />
+                {/* Password */}
+                <div>
+                  <div style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: "hsl(120 40% 35%)", letterSpacing: "0.1em", marginBottom: 4 }}>
+                    PASSKEY:
+                  </div>
+                  <div style={{ position: "relative" }}>
+                    <KeyRound size={12} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "hsl(120 40% 40%)" }} />
+                    <input
+                      id="pw-input"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && loginWithPassword()}
+                      placeholder="••••••••"
+                      data-testid="input-password"
+                      style={{ ...inputStyle, paddingRight: 36 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(s => !s)}
+                      style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "hsl(120 40% 40%)", background: "none", border: "none", cursor: "pointer" }}
+                    >
+                      {showPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  onClick={loginWithPassword}
+                  disabled={loading || !email.trim() || !password}
+                  data-testid="button-login"
+                  style={{ ...btnPrimary, opacity: (loading || !email.trim() || !password) ? 0.4 : 1 }}
+                >
+                  {loading
+                    ? <><Loader2 size={12} className="animate-spin" />AUTHENTICATING...</>
+                    : <><ArrowRight size={12} />ENTER SYSTEM</>}
+                </button>
+
+                <div style={{ textAlign: "center" }}>
                   <button
-                    type="button"
-                    onClick={() => setShowPassword(s => !s)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => setUseOtpMode(true)}
+                    style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 30% 35%)", background: "none", border: "none", cursor: "pointer", letterSpacing: "0.03em" }}
                   >
-                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    &gt; NO PASSKEY? USE EMAIL TOKEN →
                   </button>
                 </div>
               </div>
+            )}
 
-              <button
-                onClick={loginWithPassword}
-                disabled={loading || !email.trim() || !password}
-                data-testid="button-login"
-                className="w-full py-2.5 rounded-xl bg-teal text-black font-display font-700 text-sm flex items-center justify-center gap-2 hover:bg-teal/90 transition-colors disabled:opacity-50"
-              >
-                {loading ? <Loader2 size={15} className="animate-spin" /> : <><ArrowRight size={15} />Sign in</>}
-              </button>
-
-              {/* OTP fallback */}
-              <button
-                onClick={() => setUseOtpMode(true)}
-                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors text-center"
-              >
-                No password? Sign in with email code →
-              </button>
-            </div>
-          )}
-
-          {/* ── OTP fallback (email code) ── */}
-          {step === "credentials" && useOtpMode && (
-            <div className="space-y-5">
-              <div>
-                <h2 className="text-base font-display font-700 text-foreground">Sign in with code</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">We'll send a 6-digit code to your email</p>
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">Email address</label>
-                <div className="relative">
-                  <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            {/* ── OTP mode ── */}
+            {step === "credentials" && useOtpMode && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(120 60% 50%)", marginBottom: 4 }}>
+                  &gt; EMAIL TOKEN AUTH MODE
+                </div>
+                <div style={{ position: "relative" }}>
+                  <Mail size={12} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "hsl(120 40% 40%)" }} />
                   <input
                     type="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && sendOtp()}
-                    placeholder="you@example.com"
-                    className="w-full pl-9 pr-4 py-2.5 text-sm bg-secondary/40 border border-border rounded-xl text-foreground placeholder:text-muted-foreground/50 outline-none focus:ring-2 focus:ring-teal/40 focus:border-teal transition-all"
+                    placeholder="user@system.net"
+                    style={inputStyle}
                   />
                 </div>
-              </div>
-              <button
-                onClick={sendOtp}
-                disabled={loading || !email.trim()}
-                className="w-full py-2.5 rounded-xl bg-teal text-black font-display font-700 text-sm flex items-center justify-center gap-2 hover:bg-teal/90 transition-colors disabled:opacity-50"
-              >
-                {loading ? <Loader2 size={15} className="animate-spin" /> : <><ArrowRight size={15} />Send code</>}
-              </button>
-              <button
-                onClick={() => setUseOtpMode(false)}
-                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                ← Back to password login
-              </button>
-            </div>
-          )}
-
-          {/* ── OTP verification step ── */}
-          {step === "otp" && (
-            <div className="space-y-5">
-              <div>
-                <h2 className="text-base font-display font-700 text-foreground">Enter code</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Sent to <span className="text-foreground font-medium">{email}</span>
-                </p>
-              </div>
-
-              {/* Dev preview link */}
-              {previewUrl && (
-                <a
-                  href={previewUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-xs text-teal hover:underline p-2.5 rounded-lg bg-teal/8 border border-teal/20"
+                <button
+                  onClick={sendOtp}
+                  disabled={loading || !email.trim()}
+                  style={{ ...btnPrimary, opacity: (loading || !email.trim()) ? 0.4 : 1 }}
                 >
-                  <Mail size={12} />
-                  Preview email (dev mode) →
-                </a>
-              )}
-
-              <OtpInput length={6} onComplete={verifyOtp} />
-
-              {loading && (
-                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 size={13} className="animate-spin" />Verifying...
-                </div>
-              )}
-
-              <div className="flex items-center justify-between text-xs">
-                <button onClick={() => { setStep("credentials"); setUseOtpMode(true); }} className="text-muted-foreground hover:text-foreground transition-colors">
-                  ← Change email
+                  {loading ? <><Loader2 size={12} className="animate-spin" />TRANSMITTING...</> : <><ArrowRight size={12} />SEND TOKEN</>}
                 </button>
-                {countdown > 0 ? (
-                  <span className="text-muted-foreground">Resend in {countdown}s</span>
-                ) : (
-                  <button onClick={sendOtp} className="text-teal hover:underline flex items-center gap-1">
-                    <RefreshCw size={11} />Resend code
-                  </button>
-                )}
+                <button
+                  onClick={() => setUseOtpMode(false)}
+                  style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 30% 35%)", background: "none", border: "none", cursor: "pointer" }}
+                >
+                  ← BACK TO PASSKEY
+                </button>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* ── TOTP login step ── */}
-          {step === "totp" && (
-            <div className="space-y-5">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-edge/15 border border-edge/30 flex items-center justify-center flex-shrink-0">
-                  <Smartphone size={18} className="text-edge" />
+            {/* ── OTP verification ── */}
+            {step === "otp" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <div style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: "hsl(120 60% 45%)", letterSpacing: "0.1em", marginBottom: 4 }}>
+                    TOKEN TRANSMITTED
+                  </div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(120 40% 40%)" }}>
+                    DEST: <span style={{ color: "hsl(120 80% 60%)" }}>{email}</span>
+                  </div>
+                </div>
+                {previewUrl && (
+                  <a
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(45 100% 55%)", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", border: "1px solid hsl(45 100% 55% / 0.3)", background: "hsl(45 100% 55% / 0.05)" }}
+                  >
+                    <Mail size={10} /> PREVIEW EMAIL (DEV) →
+                  </a>
+                )}
+                <OtpInput length={6} onComplete={verifyOtp} />
+                {loading && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center", fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 40% 40%)" }}>
+                    <Loader2 size={11} className="animate-spin" /> VERIFYING TOKEN...
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "var(--font-mono)", fontSize: 9 }}>
+                  <button onClick={() => { setStep("credentials"); setUseOtpMode(true); }} style={{ color: "hsl(120 30% 35%)", background: "none", border: "none", cursor: "pointer" }}>
+                    ← CHANGE DEST
+                  </button>
+                  {countdown > 0
+                    ? <span style={{ color: "hsl(120 25% 30%)" }}>RESEND IN {countdown}s</span>
+                    : <button onClick={sendOtp} style={{ color: "hsl(45 100% 55%)", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                        <RefreshCw size={9} /> RESEND
+                      </button>
+                  }
+                </div>
+              </div>
+            )}
+
+            {/* ── TOTP login ── */}
+            {step === "totp" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div
+                    style={{
+                      width: 36, height: 36, flexShrink: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      border: "1px solid hsl(45 100% 55% / 0.4)",
+                      boxShadow: "0 0 10px hsl(45 100% 55% / 0.2)",
+                    }}
+                  >
+                    <Smartphone size={16} style={{ color: "hsl(45 100% 55%)" }} />
+                  </div>
+                  <div>
+                    <div style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: "hsl(45 100% 55%)", letterSpacing: "0.1em" }}>2FA REQUIRED</div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 40% 40%)", marginTop: 2 }}>Enter 6-digit authenticator code</div>
+                  </div>
+                </div>
+                <OtpInput length={6} onComplete={verifyTotp} />
+                {loading && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center", fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 40% 40%)" }}>
+                    <Loader2 size={11} className="animate-spin" /> VERIFYING...
+                  </div>
+                )}
+                <button onClick={() => { setStep("credentials"); setUseOtpMode(false); }} style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 30% 35%)", background: "none", border: "none", cursor: "pointer" }}>
+                  ← BACK TO SIGN IN
+                </button>
+              </div>
+            )}
+
+            {/* ── TOTP setup ── */}
+            {step === "totp-setup" && totpSetup && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: "hsl(175 90% 50%)", letterSpacing: "0.1em" }}>
+                  <Shield size={10} style={{ display: "inline", marginRight: 6 }} />
+                  INSTALL 2FA MODULE
+                </div>
+                <div style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: "hsl(120 40% 40%)" }}>
+                  Scan QR with Google Authenticator or Authy
+                </div>
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <div style={{ padding: 8, background: "#fff" }}>
+                    <img src={totpSetup.qrDataUrl} alt="TOTP QR" style={{ width: 140, height: 140 }} />
+                  </div>
                 </div>
                 <div>
-                  <h2 className="text-base font-display font-700 text-foreground">Authenticator</h2>
-                  <p className="text-xs text-muted-foreground">Enter the 6-digit code from your app</p>
+                  <div style={{ fontFamily: "var(--font-pixel)", fontSize: 6, color: "hsl(120 30% 30%)", marginBottom: 4, letterSpacing: "0.1em" }}>MANUAL KEY:</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid hsl(120 40% 15%)", background: "hsl(220 20% 3%)" }}>
+                    <code style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(120 80% 55%)", flex: 1, filter: showSecret ? "none" : "blur(4px)", userSelect: showSecret ? "auto" : "none" }}>
+                      {totpSetup.secret}
+                    </code>
+                    <button onClick={() => setShowSecret(s => !s)} style={{ color: "hsl(120 40% 40%)", background: "none", border: "none", cursor: "pointer" }}>
+                      {showSecret ? <EyeOff size={12} /> : <Eye size={12} />}
+                    </button>
+                  </div>
                 </div>
-              </div>
-
-              <OtpInput length={6} onComplete={verifyTotp} />
-
-              {loading && (
-                <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 size={13} className="animate-spin" />Verifying...
+                <div>
+                  <div style={{ fontFamily: "var(--font-pixel)", fontSize: 6, color: "hsl(120 30% 30%)", marginBottom: 6, letterSpacing: "0.1em" }}>CONFIRM CODE:</div>
+                  <OtpInput length={6} onComplete={c => setTotpInput(c)} />
                 </div>
-              )}
-
-              <button
-                onClick={() => { setStep("credentials"); setUseOtpMode(false); }}
-                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                ← Back to sign in
-              </button>
-            </div>
-          )}
-
-          {/* ── TOTP setup step ── */}
-          {step === "totp-setup" && totpSetup && (
-            <div className="space-y-4">
-              <div>
-                <h2 className="text-base font-display font-700 text-foreground flex items-center gap-2">
-                  <Shield size={15} className="text-teal" />Set up 2FA
-                </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Scan with Google Authenticator or Authy</p>
+                <button
+                  onClick={enableTotp}
+                  disabled={loading || totpInput.length < 6}
+                  style={{ ...btnPrimary, borderColor: "hsl(175 90% 50%)", color: "hsl(175 90% 65%)", opacity: (loading || totpInput.length < 6) ? 0.4 : 1 }}
+                >
+                  {loading ? <><Loader2 size={12} className="animate-spin" />INSTALLING...</> : <><CheckCircle size={12} />ENABLE 2FA</>}
+                </button>
+                <button onClick={() => onLogin(email)} style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 25% 30%)", background: "none", border: "none", cursor: "pointer" }}>
+                  SKIP FOR NOW →
+                </button>
               </div>
-
-              {/* QR code */}
-              <div className="flex justify-center">
-                <div className="p-3 bg-white rounded-xl">
-                  <img src={totpSetup.qrDataUrl} alt="TOTP QR" className="w-40 h-40" />
-                </div>
-              </div>
-
-              {/* Manual secret */}
-              <div className="space-y-1.5">
-                <p className="text-xs text-muted-foreground">Or enter manually:</p>
-                <div className="flex items-center gap-2 bg-secondary/40 border border-border rounded-xl px-3 py-2">
-                  <code className={`text-xs flex-1 font-mono text-teal tracking-wider ${showSecret ? "" : "blur-sm select-none"}`}>
-                    {totpSetup.secret}
-                  </code>
-                  <button onClick={() => setShowSecret(s => !s)} className="text-muted-foreground hover:text-foreground">
-                    {showSecret ? <EyeOff size={13} /> : <Eye size={13} />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Confirm token */}
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">Enter code from your app to confirm:</p>
-                <OtpInput length={6} onComplete={c => setTotpInput(c)} />
-              </div>
-
-              <button
-                onClick={enableTotp}
-                disabled={loading || totpInput.length < 6}
-                className="w-full py-2.5 rounded-xl bg-teal text-black font-display font-700 text-sm flex items-center justify-center gap-2 hover:bg-teal/90 transition-colors disabled:opacity-50"
-              >
-                {loading ? <Loader2 size={15} className="animate-spin" /> : <><CheckCircle size={15} />Enable 2FA</>}
-              </button>
-
-              <button
-                onClick={() => onLogin(email)}
-                className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Skip for now →
-              </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        {/* Setup 2FA prompt after OTP login (shown below card) */}
+        {/* Setup 2FA prompt after OTP */}
         {step === "otp" && !loading && (
           <button
             onClick={loadTotpSetup}
-            className="w-full mt-3 py-2 rounded-xl border border-edge/30 bg-edge/8 text-xs font-medium text-edge hover:bg-edge/15 transition-colors flex items-center justify-center gap-2"
+            style={{
+              width: "100%", marginTop: 8, padding: "8px 12px",
+              border: "1px solid hsl(45 100% 55% / 0.3)",
+              background: "hsl(45 100% 55% / 0.05)",
+              color: "hsl(45 100% 60%)",
+              fontFamily: "var(--font-pixel)", fontSize: 7,
+              letterSpacing: "0.08em",
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            }}
           >
-            <Shield size={12} />Set up Google Authenticator (recommended)
+            <Shield size={10} /> INSTALL GOOGLE AUTHENTICATOR
           </button>
         )}
+
+        {/* INSERT COIN prompt */}
+        <div style={{ textAlign: "center", marginTop: 16 }}>
+          <span className="insert-coin" style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: "hsl(45 100% 55%)", letterSpacing: "0.1em", textShadow: "0 0 8px hsl(45 100% 55%)" }}>
+            ★ INSERT COIN TO CONTINUE ★
+          </span>
+        </div>
       </div>
     </div>
   );

@@ -20,68 +20,103 @@ import { MiniSparkline } from "@/components/MiniSparkline";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
 import React, { useEffect, useRef, useState } from "react";
 
-// ── Live flip number animation ────────────────────────────────────────────────
-function FlipNumber({ value, prefix = "", suffix = "", className = "" }: { value: number; prefix?: string; suffix?: string; className?: string }) {
-  const [display, setDisplay] = useState(value);
-  const [flash, setFlash] = useState(false);
-  const prev = useRef(value);
-
-  useEffect(() => {
-    if (value !== prev.current) {
-      setFlash(true);
-      setDisplay(value);
-      prev.current = value;
-      const t = setTimeout(() => setFlash(false), 600);
-      return () => clearTimeout(t);
-    }
-  }, [value]);
-
+// ── Pixel section header ──────────────────────────────────────────────────────
+function SectionHeader({ title, sub, badge }: { title: string; sub?: string; badge?: string }) {
   return (
-    <span className={`${className} transition-all duration-300 ${flash ? "scale-110 opacity-100" : ""}`}
-      style={{ display: "inline-block" }}>
-      {prefix}{display}{suffix}
-    </span>
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+        <span style={{ color: "hsl(45 100% 55%)", fontFamily: "var(--font-mono)", fontSize: 10 }}>▶</span>
+        <span style={{ fontFamily: "var(--font-pixel)", fontSize: 8, color: "hsl(120 100% 60%)", letterSpacing: "0.1em", textShadow: "0 0 8px hsl(120 100% 50% / 0.5)" }}>
+          {title}
+        </span>
+        {badge && (
+          <span style={{
+            fontFamily: "var(--font-pixel)", fontSize: 6, padding: "2px 6px",
+            border: "1px solid hsl(45 100% 55% / 0.5)",
+            color: "hsl(45 100% 60%)",
+            background: "hsl(45 100% 55% / 0.08)",
+            letterSpacing: "0.05em",
+          }}>
+            {badge}
+          </span>
+        )}
+      </div>
+      {sub && <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 25% 35%)", paddingLeft: 18 }}>{sub}</div>}
+    </div>
   );
 }
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
-function StatCard({ label, value, sub, trend, icon: Icon, color = "teal", live = false, sparkData }: any) {
+// ── Stat card (arcade HUD style) ──────────────────────────────────────────────
+function StatCard({ label, value, sub, icon: Icon, color = "green", live = false, sparkData }: any) {
   const colorMap: Record<string, string> = {
-    teal: "text-teal", up: "text-up", down: "text-down", edge: "text-edge",
+    green: "hsl(120 100% 55%)",
+    amber: "hsl(45 100% 55%)",
+    red:   "hsl(0 90% 55%)",
+    cyan:  "hsl(175 90% 55%)",
+    teal:  "hsl(175 90% 55%)",
+    up:    "hsl(120 100% 55%)",
+    down:  "hsl(0 90% 55%)",
+    edge:  "hsl(45 100% 55%)",
   };
-  const bgMap: Record<string, string> = {
-    teal: "bg-teal/10 border-teal/20", up: "bg-up/10 border-up/20",
-    down: "bg-down/10 border-down/20", edge: "bg-edge/10 border-edge/20",
-  };
+  const col = colorMap[color] || colorMap.green;
+
   return (
-    <Card className={`bg-card border-border card-lift`}>
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1 flex-1 min-w-0">
-            <div className="flex items-center gap-1.5">
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{label}</p>
-              {live && <div className="w-1.5 h-1.5 rounded-full bg-up pulse-dot" />}
-            </div>
-            <p className={`text-2xl font-display font-800 ${colorMap[color] || "text-foreground"} tabular-nums`}>{value}</p>
-            {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+    <div
+      style={{
+        background: "hsl(220 20% 5%)",
+        border: `1px solid ${col}30`,
+        boxShadow: `0 0 12px ${col}10, inset 0 0 20px ${col}04`,
+        padding: "14px",
+        position: "relative",
+        cursor: "default",
+        transition: "border-color 0.2s, box-shadow 0.2s",
+      }}
+      onMouseEnter={e => {
+        (e.currentTarget as HTMLElement).style.borderColor = `${col}60`;
+        (e.currentTarget as HTMLElement).style.boxShadow = `0 0 20px ${col}25, inset 0 0 20px ${col}08`;
+      }}
+      onMouseLeave={e => {
+        (e.currentTarget as HTMLElement).style.borderColor = `${col}30`;
+        (e.currentTarget as HTMLElement).style.boxShadow = `0 0 12px ${col}10, inset 0 0 20px ${col}04`;
+      }}
+    >
+      {/* Corner accent */}
+      <div style={{ position: "absolute", top: 0, left: 0, width: 8, height: 8, borderTop: `2px solid ${col}`, borderLeft: `2px solid ${col}` }} />
+      <div style={{ position: "absolute", top: 0, right: 0, width: 8, height: 8, borderTop: `2px solid ${col}`, borderRight: `2px solid ${col}` }} />
+      <div style={{ position: "absolute", bottom: 0, left: 0, width: 8, height: 8, borderBottom: `2px solid ${col}`, borderLeft: `2px solid ${col}` }} />
+      <div style={{ position: "absolute", bottom: 0, right: 0, width: 8, height: 8, borderBottom: `2px solid ${col}`, borderRight: `2px solid ${col}` }} />
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+            <span style={{ fontFamily: "var(--font-pixel)", fontSize: 6, color: "hsl(120 25% 35%)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              {label}
+            </span>
+            {live && <div className="pulse-dot" style={{ width: 4, height: 4, background: col, boxShadow: `0 0 6px ${col}` }} />}
           </div>
-          <div className={`w-10 h-10 rounded-xl border flex items-center justify-center flex-shrink-0 ${bgMap[color] || "bg-secondary border-border"}`}>
-            <Icon className={`w-5 h-5 ${colorMap[color]}`} />
+          <div style={{ fontFamily: "var(--font-pixel)", fontSize: 13, color: col, textShadow: `0 0 10px ${col}60`, letterSpacing: "0.03em", marginBottom: 2 }}>
+            {value}
           </div>
+          {sub && <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 25% 35%)" }}>{sub}</div>}
         </div>
-        {sparkData && sparkData.length >= 2 && (
-          <div className="mt-3">
-            <MiniSparkline data={sparkData} width={120} height={28} />
-          </div>
-        )}
-        {trend !== undefined && (
-          <div className={`mt-2 flex items-center gap-1 text-xs font-medium ${trend >= 0 ? "text-up" : "text-down"}`}>
-            {trend >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-            {trend >= 0 ? "+" : ""}{trend}% today
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        <div
+          style={{
+            width: 32, height: 32, flexShrink: 0, marginLeft: 8,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            border: `1px solid ${col}30`,
+            background: `${col}10`,
+          }}
+        >
+          <Icon size={14} style={{ color: col }} />
+        </div>
+      </div>
+
+      {sparkData && sparkData.length >= 2 && (
+        <div style={{ marginTop: 8 }}>
+          <MiniSparkline data={sparkData} width={100} height={24} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -89,31 +124,46 @@ function StatCard({ label, value, sub, trend, icon: Icon, color = "teal", live =
 function AssetStrip() {
   const { assets } = useLiveData(5000);
   const keys = ["BTC", "ETH", "SOL"] as const;
-  const labels: Record<string, { color: string; accent: string }> = {
-    BTC: { color: "text-edge", accent: "border-edge/30 bg-edge/8" },
-    ETH: { color: "text-teal", accent: "border-teal/30 bg-teal/8" },
-    SOL: { color: "text-up", accent: "border-up/30 bg-up/8" },
+  const config = {
+    BTC: { color: "hsl(45 100% 55%)",  sym: "₿", label: "BITCOIN" },
+    ETH: { color: "hsl(175 90% 55%)", sym: "Ξ", label: "ETHEREUM" },
+    SOL: { color: "hsl(120 100% 55%)", sym: "◎", label: "SOLANA" },
   };
 
   return (
-    <div className="grid grid-cols-3 gap-3">
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
       {keys.map((k) => {
         const a = assets[k];
-        const { color, accent } = labels[k];
+        const { color, sym, label } = config[k];
         const isUp = (a?.change5m ?? 0) >= 0;
+        const chg = (a?.change5m ?? 0);
         return (
-          <div key={k} className={`rounded-xl border p-3 ${accent}`}>
-            <div className="flex items-center justify-between mb-2">
-              <span className={`text-xs font-display font-700 ${color}`}>{k}</span>
-              <span className={`text-[10px] font-medium flex items-center gap-0.5 ${isUp ? "text-up" : "text-down"}`}>
-                {isUp ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
-                {isUp ? "+" : ""}{(a?.change5m ?? 0).toFixed(2)}%
+          <div
+            key={k}
+            style={{
+              background: "hsl(220 20% 5%)",
+              border: `1px solid ${color}25`,
+              boxShadow: `0 0 10px ${color}08`,
+              padding: "10px 12px",
+              position: "relative",
+            }}
+          >
+            <div style={{ position: "absolute", top: 0, left: 0, width: 6, height: 6, borderTop: `1px solid ${color}`, borderLeft: `1px solid ${color}` }} />
+            <div style={{ position: "absolute", top: 0, right: 0, width: 6, height: 6, borderTop: `1px solid ${color}`, borderRight: `1px solid ${color}` }} />
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontFamily: "var(--font-pixel)", fontSize: 10, color, textShadow: `0 0 8px ${color}80` }}>{sym}</span>
+                <span style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color, letterSpacing: "0.05em" }}>{k}</span>
+              </div>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: isUp ? "hsl(120 100% 55%)" : "hsl(0 90% 55%)" }}>
+                {isUp ? "▲" : "▼"} {isUp ? "+" : ""}{chg.toFixed(2)}%
               </span>
             </div>
-            <p className="text-lg font-display font-800 text-foreground tabular-nums">
-              {a ? (a.price >= 1000 ? "$" + a.price.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "$" + a.price.toFixed(2)) : "—"}
-            </p>
-            {a && <MiniSparkline data={a.history} width={100} height={24} />}
+            <div style={{ fontFamily: "var(--font-pixel)", fontSize: 10, color: "hsl(120 85% 70%)", marginBottom: 4, letterSpacing: "0.02em" }}>
+              {a ? (a.price >= 1000 ? "$" + a.price.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "$" + a.price.toFixed(2)) : "----"}
+            </div>
+            {a && <MiniSparkline data={a.history} width={80} height={20} />}
           </div>
         );
       })}
@@ -125,44 +175,39 @@ function AssetStrip() {
 function BotHealthPanel({ d, alpaca }: { d: any; alpaca: any }) {
   const alpacaConnected = alpaca?.ok === true;
   const alpacaIsLive = alpaca?.isLive === true;
-
   const metrics = [
-    {
-      label: "Bot Status",
-      value: d.isRunning ? "Running" : "Stopped",
-      color: d.isRunning ? "text-up" : "text-muted-foreground",
-      icon: <Bot size={12} className={d.isRunning ? "text-up" : "text-muted-foreground"} />,
-    },
-    {
-      label: "Alpaca",
-      value: alpacaConnected ? (alpacaIsLive ? "Live" : "Paper") : "Offline",
-      color: alpacaConnected ? (alpacaIsLive ? "text-up" : "text-edge") : "text-down",
-      icon: alpacaConnected ? <Wifi size={12} className={alpacaIsLive ? "text-up" : "text-edge"} /> : <WifiOff size={12} className="text-down" />,
-    },
-    {
-      label: "Today's Bets",
-      value: d.todayCount ?? 0,
-      color: "text-foreground",
-      icon: <Flame size={12} className="text-edge" />,
-    },
-    {
-      label: "Engine",
-      value: "15s tick",
-      color: "text-teal",
-      icon: <Activity size={12} className="text-teal" />,
-    },
+    { label: "BOT ENGINE", value: d.isRunning ? "ONLINE" : "OFFLINE", color: d.isRunning ? "hsl(120 100% 55%)" : "hsl(120 25% 30%)", pulse: d.isRunning },
+    { label: "ALPACA", value: alpacaConnected ? (alpacaIsLive ? "LIVE" : "PAPER") : "NO SIGNAL", color: alpacaConnected ? (alpacaIsLive ? "hsl(120 100% 55%)" : "hsl(45 100% 55%)") : "hsl(0 90% 55%)" },
+    { label: "BETS TODAY", value: String(d.todayCount ?? 0), color: "hsl(45 100% 55%)" },
+    { label: "TICK RATE", value: "15s", color: "hsl(175 90% 55%)" },
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-      {metrics.map(({ label, value, color, icon }) => (
-        <div key={label} className="bg-secondary/30 rounded-xl p-3 border border-border flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-secondary flex items-center justify-center flex-shrink-0">
-            {icon}
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</p>
-            <p className={`text-sm font-display font-700 ${color}`}>{value}</p>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
+      {/* Label row */}
+      <div style={{ gridColumn: "1/-1", fontFamily: "var(--font-pixel)", fontSize: 6, color: "hsl(120 25% 30%)", letterSpacing: "0.1em", marginBottom: 2 }}>
+        ▸ SYSTEM DIAGNOSTICS
+      </div>
+      {metrics.map(({ label, value, color, pulse }) => (
+        <div
+          key={label}
+          style={{
+            background: "hsl(220 20% 4%)",
+            border: "1px solid hsl(120 30% 12%)",
+            padding: "8px 10px",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
+            {pulse && (
+              <div className="pulse-dot" style={{ width: 5, height: 5, background: color, boxShadow: `0 0 6px ${color}`, flexShrink: 0 }} />
+            )}
+            <div>
+              <div style={{ fontFamily: "var(--font-pixel)", fontSize: 6, color: "hsl(120 25% 28%)", letterSpacing: "0.08em", marginBottom: 2 }}>{label}</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color, letterSpacing: "0.05em" }}>{value}</div>
+            </div>
           </div>
         </div>
       ))}
@@ -172,42 +217,54 @@ function BotHealthPanel({ d, alpaca }: { d: any; alpaca: any }) {
 
 // ── Live trade feed row ───────────────────────────────────────────────────────
 function TradeFeedRow({ t, isNew }: { t: any; isNew: boolean }) {
-  const isWon = t.status === "won";
+  const isWon  = t.status === "won";
   const isLost = t.status === "lost";
   const isOpen = t.status === "open";
+  const pnl    = t.pnl || 0;
 
   return (
-    <div className={`px-5 py-3 flex items-center justify-between transition-all duration-500 ${isNew ? "bg-teal/5 sweep-in" : ""}`}>
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium text-foreground truncate pr-2">{t.market}</p>
-        <p className="text-[10px] text-muted-foreground mt-0.5">
-          ${t.betSize} · edge {t.edgeDetected}% ·{" "}
-          {t.createdAt ? formatDistanceToNow(new Date(t.createdAt), { addSuffix: true }) : "—"}
-        </p>
+    <div
+      className={isNew ? "sweep-in" : ""}
+      style={{
+        padding: "8px 12px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        borderBottom: "1px solid hsl(120 20% 8%)",
+        background: isNew ? "hsl(120 100% 50% / 0.03)" : "transparent",
+        transition: "background 0.5s",
+      }}
+    >
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(120 70% 55%)", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 8 }}>
+          {t.market}
+        </div>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 25% 30%)" }}>
+          ${t.betSize} · edge {t.edgeDetected}% · {t.createdAt ? formatDistanceToNow(new Date(t.createdAt), { addSuffix: true }) : "—"}
+        </div>
       </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <Badge
-          variant="outline"
-          className={`text-[10px] ${
-            t.direction === "YES" ? "text-up border-up/30 bg-up/5" : "text-down border-down/30 bg-down/5"
-          }`}
-        >
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        {/* Direction */}
+        <span style={{
+          fontFamily: "var(--font-pixel)", fontSize: 6, padding: "2px 5px",
+          border: `1px solid ${t.direction === "YES" ? "hsl(120 100% 50% / 0.4)" : "hsl(0 90% 55% / 0.4)"}`,
+          color: t.direction === "YES" ? "hsl(120 100% 60%)" : "hsl(0 90% 60%)",
+          background: t.direction === "YES" ? "hsl(120 100% 50% / 0.07)" : "hsl(0 90% 55% / 0.07)",
+        }}>
           {t.direction}
-        </Badge>
-        <Badge
-          variant="outline"
-          className={`text-[10px] ${
-            isOpen ? "text-edge border-edge/30" :
-            isWon ? "text-up border-up/30" :
-            isLost ? "text-down border-down/30" : ""
-          }`}
-        >
-          {isOpen ? <Clock size={9} className="mr-0.5" /> : isWon ? <CheckCircle size={9} className="mr-0.5" /> : <XCircle size={9} className="mr-0.5" />}
-          {t.status}
-        </Badge>
+        </span>
+        {/* Status */}
+        <span style={{
+          fontFamily: "var(--font-pixel)", fontSize: 6, padding: "2px 5px",
+          color: isOpen ? "hsl(45 100% 55%)" : isWon ? "hsl(120 100% 60%)" : "hsl(0 90% 60%)",
+          border: `1px solid ${isOpen ? "hsl(45 100% 55% / 0.3)" : isWon ? "hsl(120 100% 50% / 0.3)" : "hsl(0 90% 55% / 0.3)"}`,
+        }}>
+          {isOpen ? "LIVE" : isWon ? "WIN" : "LOSS"}
+        </span>
+        {/* PnL */}
         {!isOpen && (
-          <span className={`text-xs font-display font-700 ${(t.pnl || 0) >= 0 ? "text-up" : "text-down"}`}>
-            {(t.pnl || 0) >= 0 ? "+" : ""}${(t.pnl || 0).toFixed(2)}
+          <span style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: pnl >= 0 ? "hsl(120 100% 60%)" : "hsl(0 90% 60%)", textShadow: pnl >= 0 ? "0 0 6px hsl(120 100% 50% / 0.5)" : "0 0 6px hsl(0 90% 55% / 0.5)" }}>
+            {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
           </span>
         )}
       </div>
@@ -215,13 +272,20 @@ function TradeFeedRow({ t, isNew }: { t: any; isNew: boolean }) {
   );
 }
 
-// ── PNL Bar chart (daily) ─────────────────────────────────────────────────────
+// ── Custom chart tooltip ──────────────────────────────────────────────────────
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-card border border-border rounded-lg p-3 shadow-xl">
-      <p className="text-xs text-muted-foreground mb-1">{label}</p>
-      <p className="text-sm font-display font-700 text-teal">${payload[0]?.value?.toFixed(2)}</p>
+    <div style={{
+      background: "hsl(220 20% 4%)",
+      border: "1px solid hsl(120 60% 20%)",
+      padding: "8px 12px",
+      boxShadow: "0 0 12px hsl(120 100% 50% / 0.15)",
+    }}>
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 30% 40%)", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontFamily: "var(--font-pixel)", fontSize: 9, color: "hsl(120 100% 60%)" }}>
+        ${payload[0]?.value?.toFixed(2)}
+      </div>
     </div>
   );
 };
@@ -232,31 +296,24 @@ export default function Dashboard() {
   const prevTradeCount = useRef(0);
   const [newTradeIds, setNewTradeIds] = useState<Set<number>>(new Set());
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["/api/dashboard"],
-    refetchInterval: 5000,
-  });
-
+  const { data, isLoading } = useQuery({ queryKey: ["/api/dashboard"], refetchInterval: 5000 });
   const { data: alpacaData } = useQuery({
     queryKey: ["/api/alpaca/account"],
     queryFn: () => apiRequest("GET", "/api/alpaca/account").then((r) => r.json()),
     refetchInterval: 30000,
     retry: false,
   });
-
   const { data: trades, isLoading: tradesLoading } = useQuery({
     queryKey: ["/api/trades"],
     queryFn: () => apiRequest("GET", "/api/trades?limit=10").then((r) => r.json()),
     refetchInterval: 5000,
   });
-
   const { data: edges } = useQuery({
     queryKey: ["/api/edges"],
     queryFn: () => apiRequest("GET", "/api/edges?limit=5").then((r) => r.json()),
     refetchInterval: 5000,
   });
 
-  // Flash new rows
   useEffect(() => {
     if (!trades) return;
     const list: any[] = Array.isArray(trades) ? trades : [];
@@ -272,16 +329,16 @@ export default function Dashboard() {
     mutationFn: () => apiRequest("POST", "/api/bot/start"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      toast({ title: "Bot started", description: "Edge detection is now running." });
+      toast({ title: "BOT STARTED", description: "Edge detection running." });
     },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "ERROR", description: e.message, variant: "destructive" }),
   });
 
   const stopMutation = useMutation({
     mutationFn: () => apiRequest("POST", "/api/bot/stop"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      toast({ title: "Bot stopped" });
+      toast({ title: "BOT STOPPED" });
     },
   });
 
@@ -291,10 +348,8 @@ export default function Dashboard() {
     label: format(new Date(s.timestamp), "MMM d HH:mm"),
     pnl: s.pnl ?? 0,
   }));
-
   const totalPnl = (d.totalBalance || 0) - (d.startingBalance || 0);
   const winRatePct = d.winRate?.rate ? Math.round(d.winRate.rate * 100) : 0;
-
   const alpaca: any = alpacaData || {};
   const alpacaConnected = alpaca.ok === true;
   const alpacaIsLive = alpaca.isLive === true;
@@ -302,198 +357,244 @@ export default function Dashboard() {
     ? parseFloat(alpaca.account.portfolio_value || alpaca.account.cash || "0")
     : null;
   const displayBalance = alpacaBalance !== null ? alpacaBalance : (d.totalBalance || 0);
-
   const tradeList: any[] = Array.isArray(trades) ? trades : [];
-
-  // Build sparkline for balance
   const balanceSpark = pnlHistory.map((p: any) => ({ ts: new Date(p.timestamp || Date.now()).getTime(), price: p.balance ?? 0 }));
 
   return (
-    <div className="p-6 space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {/* ── Header HUD ── */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div>
-          <h1 className="font-display text-2xl font-800 text-foreground tracking-tight">Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Live BTC · ETH · SOL edge detection & automated execution</p>
+          <div style={{ fontFamily: "var(--font-pixel)", fontSize: 11, color: "hsl(120 100% 60%)", textShadow: "0 0 12px hsl(120 100% 50% / 0.5)", letterSpacing: "0.08em", marginBottom: 4 }}>
+            ══ MISSION CONTROL ══
+          </div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(120 30% 40%)" }}>
+            LIVE BTC · ETH · SOL EDGE DETECTION &amp; AUTO EXECUTION
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Live status indicator */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-border bg-secondary/50">
-            <div className={`w-2 h-2 rounded-full ${d.isRunning ? "bg-up pulse-dot" : "bg-muted-foreground"}`} />
-            <span className={`text-xs font-medium ${d.isRunning ? "text-up" : "text-muted-foreground"}`}>
-              {d.isRunning ? "Bot Running" : "Bot Stopped"}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Bot status badge */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "5px 10px",
+            border: `1px solid ${d.isRunning ? "hsl(120 100% 50% / 0.4)" : "hsl(120 25% 20%)"}`,
+            background: d.isRunning ? "hsl(120 100% 50% / 0.07)" : "hsl(220 20% 5%)",
+            boxShadow: d.isRunning ? "0 0 12px hsl(120 100% 50% / 0.15)" : "none",
+          }}>
+            {d.isRunning && <div className="pulse-dot" style={{ width: 5, height: 5, background: "hsl(120 100% 55%)", boxShadow: "0 0 6px hsl(120 100% 50%)" }} />}
+            <span style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: d.isRunning ? "hsl(120 100% 60%)" : "hsl(120 25% 35%)", letterSpacing: "0.08em" }}>
+              {d.isRunning ? "BOT: ACTIVE" : "BOT: STANDBY"}
             </span>
           </div>
+
+          {/* Start / Stop */}
           {d.isRunning ? (
-            <Button size="sm" variant="destructive" onClick={() => stopMutation.mutate()} disabled={stopMutation.isPending} className="gap-2 h-9">
-              <Square size={13} /> Stop Bot
-            </Button>
+            <button
+              onClick={() => stopMutation.mutate()}
+              disabled={stopMutation.isPending}
+              style={{
+                background: "transparent",
+                border: "2px solid hsl(0 90% 55%)",
+                color: "hsl(0 90% 65%)",
+                fontFamily: "var(--font-pixel)", fontSize: 8,
+                letterSpacing: "0.08em", textTransform: "uppercase",
+                padding: "6px 12px", cursor: "pointer",
+                boxShadow: "0 0 10px hsl(0 90% 55% / 0.2)",
+                display: "flex", alignItems: "center", gap: 6,
+              }}
+            >
+              <Square size={10} /> HALT
+            </button>
           ) : (
-            <Button size="sm" onClick={() => startMutation.mutate()} disabled={startMutation.isPending}
-              className="gap-2 h-9 bg-teal text-background hover:bg-teal/90 bot-running">
-              <Play size={13} /> Start Bot
-            </Button>
+            <button
+              onClick={() => startMutation.mutate()}
+              disabled={startMutation.isPending}
+              className="bot-running"
+              style={{
+                background: "transparent",
+                border: "2px solid hsl(120 100% 50%)",
+                color: "hsl(120 100% 65%)",
+                fontFamily: "var(--font-pixel)", fontSize: 8,
+                letterSpacing: "0.08em", textTransform: "uppercase",
+                padding: "6px 12px", cursor: "pointer",
+                boxShadow: "0 0 14px hsl(120 100% 50% / 0.3)",
+                display: "flex", alignItems: "center", gap: 6,
+              }}
+            >
+              <Play size={10} /> LAUNCH
+            </button>
           )}
         </div>
       </div>
 
-      {/* Live asset strip */}
+      {/* ── Asset strip ── */}
       <AssetStrip />
 
-      {/* Bot health */}
+      {/* ── Bot health ── */}
       <BotHealthPanel d={d} alpaca={alpaca} />
 
-      {/* Connection status — compact pills */}
+      {/* ── Connection pills ── */}
       <ConnectionStatus compact refetchInterval={30000} />
 
-      {/* Stats grid */}
+      {/* ── Win rate health bar ── */}
+      <div style={{
+        background: "hsl(220 20% 5%)",
+        border: "1px solid hsl(120 30% 12%)",
+        padding: "12px 14px",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+          <span style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: "hsl(120 25% 35%)", letterSpacing: "0.1em" }}>WIN RATE</span>
+          <span style={{ fontFamily: "var(--font-pixel)", fontSize: 8, color: winRatePct >= 55 ? "hsl(120 100% 60%)" : winRatePct >= 40 ? "hsl(45 100% 55%)" : "hsl(0 90% 55%)" }}>
+            {winRatePct}%
+          </span>
+        </div>
+        <div className="health-bar">
+          <div
+            className="health-bar-fill"
+            style={{
+              width: `${Math.min(winRatePct, 100)}%`,
+              background: `linear-gradient(90deg,
+                ${winRatePct >= 55 ? "hsl(120 100% 35%), hsl(120 100% 55%)" :
+                  winRatePct >= 40 ? "hsl(30 100% 40%), hsl(45 100% 55%)" :
+                                     "hsl(0 80% 35%), hsl(0 90% 55%)"}
+              )`,
+            }}
+          />
+        </div>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 25% 30%)", marginTop: 4 }}>
+          {d.winRate?.wins || 0} WINS / {d.winRate?.total || 0} RESOLVED
+        </div>
+      </div>
+
+      {/* ── Stat cards ── */}
       {isLoading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+          {[...Array(4)].map((_, i) => (
+            <div key={i} style={{ height: 100, background: "hsl(220 20% 5%)", border: "1px solid hsl(120 30% 10%)" }} />
+          ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
           <StatCard
-            label="Portfolio"
-            value={`$${displayBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
-            sub={alpacaConnected
-              ? `${alpacaIsLive ? "Live" : "Paper"} · cash $${parseFloat(alpaca.account?.cash || "0").toFixed(2)}`
-              : `Started $${(d.startingBalance || 0).toFixed(2)}`}
-            icon={DollarSign}
-            color="teal"
-            live={alpacaConnected}
-            sparkData={balanceSpark}
+            label="PORTFOLIO"
+            value={`$${displayBalance.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+            sub={alpacaConnected ? `${alpacaIsLive ? "LIVE" : "PAPER"} · $${parseFloat(alpaca.account?.cash || "0").toFixed(0)} CASH` : `BASE $${(d.startingBalance || 0).toFixed(0)}`}
+            icon={DollarSign} color="cyan" live={alpacaConnected} sparkData={balanceSpark}
           />
           <StatCard
-            label="Total Return"
+            label="TOTAL RETURN"
             value={`${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`}
-            sub={`${d.totalReturn || 0}% all-time`}
-            icon={TrendingUp}
-            color={totalPnl >= 0 ? "up" : "down"}
+            sub={`${d.totalReturn || 0}% ALL-TIME`}
+            icon={TrendingUp} color={totalPnl >= 0 ? "green" : "red"}
           />
           <StatCard
-            label="Today's PNL"
+            label="TODAY PNL"
             value={`${(d.todayPnl || 0) >= 0 ? "+" : ""}$${(d.todayPnl || 0).toFixed(2)}`}
-            sub={`${d.todayCount || 0} bets today`}
-            icon={Activity}
-            color={(d.todayPnl || 0) >= 0 ? "up" : "down"}
-            live
+            sub={`${d.todayCount || 0} BETS PLACED`}
+            icon={Activity} color={(d.todayPnl || 0) >= 0 ? "green" : "red"} live
           />
           <StatCard
-            label="Win Rate"
+            label="WIN RATE"
             value={`${winRatePct}%`}
-            sub={`${d.winRate?.wins || 0} of ${d.winRate?.total || 0} resolved`}
-            icon={Target}
-            color="edge"
+            sub={`${d.winRate?.wins || 0} / ${d.winRate?.total || 0}`}
+            icon={Target} color="amber"
           />
         </div>
       )}
 
-      {/* PNL chart + edge feed */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* PNL Chart */}
-        <Card className="lg:col-span-2 bg-card border-border">
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-sm font-display font-700">Portfolio Performance</CardTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">Balance over time (updates every 5s)</p>
-            </div>
-            <Badge variant="outline" className="text-xs text-teal border-teal/30">
-              <ArrowUpRight size={11} className="mr-1" />{d.totalReturn || 0}%
-            </Badge>
-          </CardHeader>
-          <CardContent className="pt-0">
+      {/* ── Chart + edges ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,2fr) minmax(0,1fr)", gap: 8 }}>
+
+          {/* PNL chart */}
+          <div style={{ background: "hsl(220 20% 5%)", border: "1px solid hsl(120 30% 12%)", padding: "12px 14px" }}>
+            <SectionHeader title="PERFORMANCE CHART" sub="Balance over time" badge={`${d.totalReturn || 0}% ROI`} />
             {isLoading ? (
-              <Skeleton className="h-52 w-full" />
+              <div style={{ height: 180, background: "hsl(220 20% 4%)" }} />
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
+              <ResponsiveContainer width="100%" height={180}>
                 <AreaChart data={pnlHistory}>
                   <defs>
                     <linearGradient id="balGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(175, 75%, 42%)" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="hsl(175, 75%, 42%)" stopOpacity={0} />
+                      <stop offset="5%"  stopColor="hsl(120, 100%, 50%)" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="hsl(120, 100%, 50%)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 12%, 18%)" />
-                  <XAxis dataKey="label" tick={{ fill: "hsl(210, 10%, 55%)", fontSize: 10 }} tickLine={false} axisLine={false} />
-                  <YAxis tick={{ fill: "hsl(210, 10%, 55%)", fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v.toLocaleString()}`} />
+                  <CartesianGrid strokeDasharray="2 2" stroke="hsl(120 30% 10%)" />
+                  <XAxis dataKey="label" tick={{ fill: "hsl(120 25% 30%)", fontSize: 8, fontFamily: "Share Tech Mono" }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: "hsl(120 25% 30%)", fontSize: 8, fontFamily: "Share Tech Mono" }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v.toLocaleString()}`} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="balance" stroke="hsl(175, 75%, 42%)" strokeWidth={2} fill="url(#balGrad)" />
+                  <Area type="monotone" dataKey="balance" stroke="hsl(120, 100%, 50%)" strokeWidth={1.5} fill="url(#balGrad)" />
                 </AreaChart>
               </ResponsiveContainer>
             )}
-          </CardContent>
-        </Card>
+          </div>
 
-        {/* Edge Opportunities */}
-        <Card className="bg-card border-border">
-          <CardHeader className="pb-3 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-display font-700 flex items-center gap-2">
-              <Zap size={13} className="text-edge" />
-              Live Edges
-            </CardTitle>
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-up pulse-dot" />
-              <Badge variant="outline" className="text-[10px] badge-edge">Live</Badge>
+          {/* Live edges */}
+          <div style={{ background: "hsl(220 20% 5%)", border: "1px solid hsl(120 30% 12%)", padding: "12px 14px", overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: "hsl(45 100% 55%)", letterSpacing: "0.08em", textShadow: "0 0 6px hsl(45 100% 55% / 0.5)" }}>
+                ⚡ LIVE EDGES
+              </div>
+              <div className="pulse-dot" style={{ width: 5, height: 5, background: "hsl(120 100% 55%)", boxShadow: "0 0 6px hsl(120 100% 50%)" }} />
             </div>
-          </CardHeader>
-          <CardContent className="p-0">
             {!edges?.length ? (
-              <p className="text-sm text-muted-foreground px-5 pb-4">Scanning for edges…</p>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 25% 30%)" }}>SCANNING FOR EDGES<span className="blink">_</span></div>
             ) : (
-              <div className="divide-y divide-border">
+              <div>
                 {edges.slice(0, 6).map((e: any) => (
-                  <div key={e.id} className="px-4 py-3 sweep-in">
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-xs font-medium text-foreground truncate pr-2 flex-1">{e.market}</p>
-                      <span className="text-xs font-display font-800 text-edge flex-shrink-0">+{e.edgePct}%</span>
+                  <div key={e.id} className="sweep-in" style={{ borderBottom: "1px solid hsl(120 20% 8%)", paddingBottom: 6, marginBottom: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 60% 55%)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, paddingRight: 6 }}>
+                        {e.market}
+                      </div>
+                      <span style={{ fontFamily: "var(--font-pixel)", fontSize: 7, color: "hsl(45 100% 60%)", flexShrink: 0 }}>+{e.edgePct}%</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <p className="text-[10px] text-muted-foreground">
-                        Poly {(e.polyOdds * 100).toFixed(0)}¢ → Implied {(e.impliedOdds * 100).toFixed(0)}¢
-                      </p>
-                      <Badge className={`text-[10px] ${e.direction === "YES" ? "bg-up/15 text-up border-up/20" : "bg-down/15 text-down border-down/20"} border`}>
-                        {e.direction}
-                      </Badge>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "hsl(120 25% 30%)" }}>
+                      {(e.polyOdds * 100).toFixed(0)}¢ → {(e.impliedOdds * 100).toFixed(0)}¢
                     </div>
                   </div>
                 ))}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
-      {/* Live trade feed */}
-      <Card className="bg-card border-border">
-        <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-sm font-display font-700 flex items-center gap-2">
-            <BarChart3 size={13} className="text-teal" />
-            Live Trade Feed
-          </CardTitle>
-          <div className="flex items-center gap-2">
-            {tradeList.length > 0 && (
-              <span className="text-xs text-muted-foreground">{tradeList.length} orders</span>
-            )}
-            <div className="w-1.5 h-1.5 rounded-full bg-up pulse-dot" />
+      {/* ── Live trade feed ── */}
+      <div style={{ background: "hsl(220 20% 5%)", border: "1px solid hsl(120 30% 12%)" }}>
+        <div style={{
+          padding: "10px 14px",
+          borderBottom: "1px solid hsl(120 20% 8%)",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <SectionHeader title="LIVE TRADE FEED" />
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {tradeList.length > 0 && <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 25% 30%)" }}>{tradeList.length} ORDERS</span>}
+            <div className="pulse-dot" style={{ width: 5, height: 5, background: "hsl(120 100% 55%)" }} />
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {tradesLoading ? (
-            <div className="px-5 pb-4 space-y-2">
-              {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-12" />)}
-            </div>
-          ) : !tradeList.length ? (
-            <p className="text-sm text-muted-foreground px-5 pb-4">No trades yet. Start the bot and add your Alpaca keys.</p>
-          ) : (
-            <div className="divide-y divide-border/50">
-              {tradeList.slice(0, 8).map((t: any) => (
-                <TradeFeedRow key={t.id} t={t} isNew={newTradeIds.has(t.id)} />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        </div>
+        {tradesLoading ? (
+          <div style={{ padding: "12px 14px" }}>
+            {[...Array(4)].map((_, i) => (
+              <div key={i} style={{ height: 40, background: "hsl(220 20% 4%)", marginBottom: 4 }} />
+            ))}
+          </div>
+        ) : !tradeList.length ? (
+          <div style={{ padding: "14px", fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(120 25% 30%)" }}>
+            &gt; NO TRADES LOGGED. START BOT AND ADD ALPACA KEYS.
+            <span className="blink">_</span>
+          </div>
+        ) : (
+          <div>
+            {tradeList.slice(0, 8).map((t: any) => (
+              <TradeFeedRow key={t.id} t={t} isNew={newTradeIds.has(t.id)} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
