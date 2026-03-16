@@ -187,13 +187,17 @@ export default function TerminalChat() {
   // Boot animation
   useEffect(() => {
     let i = 0;
+    let cancelled = false;
     const show = () => {
-      if (i >= BOOT_LINES.length) return;
-      setBootLines(prev => [...prev, BOOT_LINES[i]]);
+      if (cancelled || i >= BOOT_LINES.length) return;
+      const line = BOOT_LINES[i];
+      if (!line) return;
+      setBootLines(prev => [...prev, line]);
       i++;
-      setTimeout(show, BOOT_LINES[i - 1].delay > 0 ? 80 : 0);
+      setTimeout(show, 80);
     };
-    setTimeout(show, 100);
+    const t = setTimeout(show, 100);
+    return () => { cancelled = true; clearTimeout(t); };
   }, []);
 
   // Auto-scroll
@@ -426,8 +430,8 @@ export default function TerminalChat() {
         scrollbarColor: `${COLORS.dimmer} transparent`,
       }}>
         {/* Boot lines */}
-        {bootLines.map((bl, i) => (
-          <BootLine key={i} text={bl.text} color={bl.color} />
+        {bootLines.filter(Boolean).map((bl, i) => (
+          <BootLine key={i} text={bl?.text ?? ""} color={bl?.color ?? COLORS.dim} />
         ))}
 
         {/* Chat lines */}
