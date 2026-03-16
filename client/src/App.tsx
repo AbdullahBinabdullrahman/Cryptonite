@@ -15,6 +15,7 @@ import { LiveTicker } from "@/components/LiveTicker";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import Portfolio from "@/pages/Portfolio";
+import { LiveBotSprite } from "@/components/BotSprite";
 import {
   LayoutDashboard, TrendingUp, List, Settings2, Zap, Copy,
   Bot, Menu, X, PieChart
@@ -90,6 +91,19 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
             </button>
           )}
         </div>
+      </div>
+
+      {/* ── Bot sprite ── */}
+      <div style={{
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: "12px 0 8px",
+        borderBottom: "1px solid hsl(120 40% 10%)",
+        borderTop: "1px solid hsl(120 40% 10%)",
+        background: "hsl(220 20% 3%)",
+      }}>
+        <LiveBotSprite size={4} label={true} />
       </div>
 
       {/* ── Nav ── */}

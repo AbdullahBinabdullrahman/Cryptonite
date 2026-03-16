@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useLiveData } from "@/hooks/useLiveData";
 import { MiniSparkline } from "@/components/MiniSparkline";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
+import { LiveBotSprite } from "@/components/BotSprite";
 import React, { useEffect, useRef, useState } from "react";
 
 // ── Pixel section header ──────────────────────────────────────────────────────
@@ -365,12 +366,16 @@ export default function Dashboard() {
 
       {/* ── Header HUD ── */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-        <div>
-          <div style={{ fontFamily: "var(--font-pixel)", fontSize: 11, color: "hsl(120 100% 60%)", textShadow: "0 0 12px hsl(120 100% 50% / 0.5)", letterSpacing: "0.08em", marginBottom: 4 }}>
-            ══ MISSION CONTROL ══
-          </div>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(120 30% 40%)" }}>
-            LIVE BTC · ETH · SOL EDGE DETECTION &amp; AUTO EXECUTION
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {/* Bot sprite */}
+          <LiveBotSprite size={5} label={false} />
+          <div>
+            <div style={{ fontFamily: "var(--font-pixel)", fontSize: 11, color: "hsl(120 100% 60%)", textShadow: "0 0 12px hsl(120 100% 50% / 0.5)", letterSpacing: "0.08em", marginBottom: 4 }}>
+              ══ MISSION CONTROL ══
+            </div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(120 30% 40%)" }}>
+              LIVE BTC · ETH · SOL EDGE DETECTION &amp; AUTO EXECUTION
+            </div>
           </div>
         </div>
 
