@@ -14,17 +14,19 @@ import PerplexityAttribution from "@/components/PerplexityAttribution";
 import { LiveTicker } from "@/components/LiveTicker";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import Portfolio from "@/pages/Portfolio";
 import {
   LayoutDashboard, TrendingUp, List, Settings2, Zap, Copy,
-  Bot, Menu, X
+  Bot, Menu, X, PieChart
 } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/",         icon: LayoutDashboard, label: "Dashboard"  },
-  { href: "/markets",  icon: TrendingUp,      label: "Markets"    },
-  { href: "/trades",   icon: List,            label: "Trades"     },
-  { href: "/copy",     icon: Copy,            label: "Copy Trade" },
-  { href: "/settings", icon: Settings2,       label: "Settings"   },
+  { href: "/",          icon: LayoutDashboard, label: "Dashboard"  },
+  { href: "/portfolio", icon: PieChart,        label: "Portfolio"  },
+  { href: "/markets",   icon: TrendingUp,      label: "Markets"    },
+  { href: "/trades",    icon: List,            label: "Trades"     },
+  { href: "/copy",      icon: Copy,            label: "Copy Trade" },
+  { href: "/settings",  icon: Settings2,       label: "Settings"   },
 ];
 
 // ── Bot status pill ───────────────────────────────────────────────────────────
@@ -186,11 +188,12 @@ function AppShell() {
             {/* Page content — extra bottom padding on mobile for bottom nav */}
             <main className="flex-1 pb-20 md:pb-0">
               <Switch>
-                <Route path="/"         component={Dashboard} />
-                <Route path="/markets"  component={Markets}   />
-                <Route path="/trades"   component={Trades}    />
-                <Route path="/copy"     component={CopyTrade} />
-                <Route path="/settings" component={Settings}  />
+                <Route path="/"          component={Dashboard}  />
+                <Route path="/portfolio" component={Portfolio}  />
+                <Route path="/markets"   component={Markets}    />
+                <Route path="/trades"    component={Trades}     />
+                <Route path="/copy"      component={CopyTrade}  />
+                <Route path="/settings"  component={Settings}   />
                 <Route component={NotFound} />
               </Switch>
             </main>

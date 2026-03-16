@@ -5,7 +5,7 @@ import { insertBotSettingsSchema, insertTradeSchema } from "@shared/schema";
 import { startBotEngine, stopBotEngine } from "./botEngine";
 import { startCopyEngine, syncWalletNow } from "./copyEngine";
 import { startClobStrategy, stopClobStrategy, getClobSnapshot } from "./clobStrategy";
-import { fetchAlpacaAccount } from "./alpacaClient";
+import { fetchAlpacaAccount, fetchAlpacaPositions } from "./alpacaClient";
 import { fetchOrderStatus } from "./alpacaOrders";
 import { fetchWalletPositions } from "./polymarketClient";
 import {
@@ -191,6 +191,92 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
     }
     res.json(result);
+  });
+
+  // ─── Portfolio ────────────────────────────────────────────────────────────
+  // GET /api/portfolio — Alpaca positions + bot trade P&L summary
+  app.get("/api/portfolio", async (_req, res) => {
+    const settings = await storage.getBotSettings();
+
+    // 1. Alpaca live positions
+    let alpacaPositions: any[] = [];
+    let isLive = false;
+    if (settings.alpacaApiKey && settings.alpacaApiSecret) {
+      const r = await fetchAlpacaPositions(settings.alpacaApiKey, settings.alpacaApiSecret);
+      if (r.ok && r.positions) {
+        alpacaPositions = r.positions;
+        isLive = r.isLive ?? false;
+      }
+    }
+
+    // 2. Bot trade summary — group open trades by market, compute avg entry & unrealized P&L
+    const allTrades = await storage.getTrades(10000);
+    const openTrades = allTrades.filter(t => t.status === "open" || t.status === "clob:placed" || t.status === "clob:simulated" || t.status === "pending" || t.status === "filled");
+    const resolvedTrades = allTrades.filter(t => t.status === "won" || t.status === "lost");
+
+    // Group open trades by market question
+    const byMarket: Record<string, typeof openTrades> = {};
+    for (const t of openTrades) {
+      const key = t.market || t.marketId;
+      if (!byMarket[key]) byMarket[key] = [];
+      byMarket[key].push(t);
+    }
+
+    const openPositions = Object.entries(byMarket).map(([market, trades]) => {
+      const totalInvested = trades.reduce((s, t) => s + t.betSize, 0);
+      const avgEntry = trades.reduce((s, t) => s + t.entryOdds, 0) / trades.length;
+      const direction = trades[0].direction;
+      const latestTs = trades.reduce((max, t) => Math.max(max, new Date(t.createdAt).getTime()), 0);
+      return {
+        market,
+        direction,
+        tradeCount: trades.length,
+        totalInvested: Math.round(totalInvested * 100) / 100,
+        avgEntryPrice: Math.round(avgEntry * 1000) / 1000,
+        unrealizedPnl: 0, // resolved at settlement
+        openedAt: new Date(latestTs).toISOString(),
+      };
+    });
+
+    // 3. Resolved P&L summary by asset/market type
+    const totalRealized = resolvedTrades.reduce((s, t) => s + t.pnl, 0);
+    const won  = resolvedTrades.filter(t => t.status === "won").length;
+    const lost = resolvedTrades.filter(t => t.status === "lost").length;
+
+    // 4. All-time P&L by day (for sparkline)
+    const byDay: Record<string, number> = {};
+    for (const t of resolvedTrades) {
+      if (!t.resolvedAt) continue;
+      const day = new Date(t.resolvedAt).toISOString().slice(0, 10);
+      byDay[day] = (byDay[day] ?? 0) + t.pnl;
+    }
+    const pnlByDay = Object.entries(byDay)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, pnl]) => ({ date, pnl: Math.round(pnl * 100) / 100 }));
+
+    res.json({
+      alpaca: {
+        positions: alpacaPositions,
+        isLive,
+        count: alpacaPositions.length,
+      },
+      bot: {
+        openPositions,
+        openCount: openPositions.length,
+        totalInvested: openPositions.reduce((s, p) => s + p.totalInvested, 0),
+        resolvedCount: resolvedTrades.length,
+        totalRealizedPnl: Math.round(totalRealized * 100) / 100,
+        won,
+        lost,
+        winRate: resolvedTrades.length > 0 ? Math.round((won / resolvedTrades.length) * 1000) / 10 : 0,
+        pnlByDay,
+      },
+      account: {
+        totalBalance: settings.totalBalance,
+        startingBalance: settings.startingBalance,
+        allTimePnl: Math.round((settings.totalBalance - settings.startingBalance) * 100) / 100,
+      },
+    });
   });
 
   // ─── Bot Control ──────────────────────────────────────────────────────────
