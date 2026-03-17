@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertBotSettingsSchema, insertTradeSchema } from "@shared/schema";
-import { startBotEngine, stopBotEngine } from "./botEngine";
+import { startBotEngine, stopBotEngine, getLiveStrategyState } from "./botEngine";
 import { startCopyEngine, syncWalletNow } from "./copyEngine";
 import { startClobStrategy, stopClobStrategy, getClobSnapshot } from "./clobStrategy";
 import { fetchAlpacaAccount, fetchAlpacaPositions } from "./alpacaClient";
@@ -741,6 +741,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         })),
         dailySeries,
       });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Live strategy state (for Analytics page) ──────────────────────────────
+  app.get("/api/strategy-state", (_req, res) => {
+    try {
+      const state = getLiveStrategyState();
+      res.json({ assets: state, timestamp: Date.now() });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

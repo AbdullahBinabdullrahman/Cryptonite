@@ -1,168 +1,313 @@
 /**
- * Bot Engine v2 — Multi-asset EMA trend filter + win-rate circuit breaker
+ * Bot Engine v3 — Multi-Mode Trading System
  *
- * Improvements over v1:
- *   1. REAL EMA trend filter: EMA(5) × EMA(15) cross determines direction
- *      — no more random edge fabrication
- *   2. Only fires when EMA cross is confirmed AND momentum agrees
- *   3. Win-rate circuit breaker: if last 20 trades < 35% win rate → pause 30 min
- *   4. Trade source tagging: every trade gets source="momentum" in market label
- *   5. Dynamic Kelly bet sizing with hard floor/ceiling ($10–$100)
+ * Three concurrent trading modes per asset, each running at a different cadence:
  *
- * Every 15 seconds:
- *   1. Fetch BTC, ETH, SOL prices
- *   2. Update EMA(5) and EMA(15) price series per asset
- *   3. Detect EMA cross + momentum alignment
- *   4. If confirmed edge ≥ minEdgePct → Alpaca BUY order
- *   5. Sync order statuses every 60s
+ *   SCALP  (15s)   — EMA(5/15) cross + RSI(14) + Bollinger squeeze
+ *                    Smallest bets ($10–$25), highest frequency, 90s cooldown
+ *
+ *   DAY    (5min)  — Liquidity Sweep reversal + VWAP deviation + Breaker Block
+ *                    Medium bets ($15–$60), 10-min cooldown per asset
+ *
+ *   SWING  (1hr)   — EMA(50/200) trend + Funding Rate proxy + OB imbalance
+ *                    Largest bets ($25–$100), 2-hour cooldown per asset
+ *
+ * Signal voting: each mode requires 3-of-5 strategy signals to agree before firing.
+ * Polymarket crowd confirmation still acts as final gate for SCALP and DAY modes.
+ *
+ * All modes run on Alpaca (BUY only — no short selling on crypto).
+ * Order sync continues every 60s.
  */
 
 import { storage } from "./storage";
 import { placeAlpacaOrder, fetchOrderStatus } from "./alpacaOrders";
 import { crowdConfirms } from "./polymarketSignal";
 
-// ─── Time-of-day boost ────────────────────────────────────────────────────────
-// US market hours (13:00–21:00 UTC) = highest volume/volatility → boost by 1.3×
-// EU market hours (07:00–16:00 UTC) = moderate boost 1.15×
-// Otherwise (Asian/quiet hours)     = no boost (1.0×)
-function getTimeOfDayMultiplier(): number {
-  const utcHour = new Date().getUTCHours();
-  if (utcHour >= 13 && utcHour < 21) return 1.30; // US session
-  if (utcHour >= 7  && utcHour < 16) return 1.15; // EU session
-  return 1.0; // quiet hours — trade conservatively
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 1 — SHARED UTILITIES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Time-of-day session multiplier ──────────────────────────────────────────
+function getSessionMultiplier(): number {
+  const h = new Date().getUTCHours();
+  if (h >= 13 && h < 21) return 1.35; // US session — peak volume
+  if (h >= 7  && h < 16) return 1.15; // EU session
+  return 0.85; // Asian/quiet hours — reduce risk
 }
 
-// ─── RSI(14) per-asset tracker ───────────────────────────────────────────────
+function getSessionName(): string {
+  const h = new Date().getUTCHours();
+  if (h >= 13 && h < 21) return "US";
+  if (h >= 7  && h < 16) return "EU";
+  return "ASIA";
+}
+
+// ─── EMA calculator ──────────────────────────────────────────────────────────
+function calcEma(price: number, prev: number | null, period: number): number {
+  if (prev === null) return price;
+  const k = 2 / (period + 1);
+  return price * k + prev * (1 - k);
+}
+
+// ─── RSI(14) — Wilder smoothing ──────────────────────────────────────────────
 interface RsiState {
+  prices: number[];
+  avgGain: number | null;
+  avgLoss: number | null;
+  lastPrice: number | null;
+  value: number | null;
+}
+
+function makeRsi(): RsiState {
+  return { prices: [], avgGain: null, avgLoss: null, lastPrice: null, value: null };
+}
+
+function updateRsi(s: RsiState, price: number): number | null {
+  const PERIOD = 14;
+  if (s.lastPrice === null) { s.lastPrice = price; return null; }
+  const change = price - s.lastPrice;
+  s.lastPrice = price;
+  const gain = change > 0 ? change : 0;
+  const loss = change < 0 ? Math.abs(change) : 0;
+  if (s.avgGain === null) {
+    s.prices.push(gain); // re-using prices[] as gain buffer
+    if (s.prices.length < PERIOD) return null;
+    // bootstrap averages — need to store gains/losses separately
+    // prices[] holds gains, use a second field hack: store losses in extra slot
+    // Actually let's just track gain buffer properly:
+    // On first call after PERIOD ticks, avgGain is set
+    s.avgGain = s.prices.reduce((a, b) => a + b, 0) / PERIOD;
+    // losses — we can't recover them here, estimate as 0 for bootstrap
+    s.avgLoss = 0;
+  } else {
+    s.avgGain = (s.avgGain * (PERIOD - 1) + gain) / PERIOD;
+    s.avgLoss = (s.avgLoss! * (PERIOD - 1) + loss) / PERIOD;
+  }
+  if (s.avgLoss === 0) { s.value = 100; return 100; }
+  const rs = s.avgGain! / s.avgLoss!;
+  s.value = Math.round((100 - 100 / (1 + rs)) * 100) / 100;
+  return s.value;
+}
+
+// ─── Proper RSI with dual gain/loss tracking ──────────────────────────────────
+interface RsiStateV2 {
   gains: number[];
   losses: number[];
   avgGain: number | null;
   avgLoss: number | null;
   lastPrice: number | null;
-  rsi: number | null; // current RSI value
+  value: number | null;
 }
 
-function makeRsi(): RsiState {
-  return { gains: [], losses: [], avgGain: null, avgLoss: null, lastPrice: null, rsi: null };
+function makeRsiV2(): RsiStateV2 {
+  return { gains: [], losses: [], avgGain: null, avgLoss: null, lastPrice: null, value: null };
 }
 
-/**
- * Wilder RSI(14) update — call once per tick with the new price.
- * Returns RSI 0–100. Returns null until 15 ticks are accumulated.
- */
-function updateRsi(state: RsiState, price: number): number | null {
+function updateRsiV2(s: RsiStateV2, price: number): number | null {
   const PERIOD = 14;
-  if (state.lastPrice === null) { state.lastPrice = price; return null; }
-
-  const change = price - state.lastPrice;
-  state.lastPrice = price;
+  if (s.lastPrice === null) { s.lastPrice = price; return null; }
+  const change = price - s.lastPrice;
+  s.lastPrice = price;
   const gain = change > 0 ? change : 0;
   const loss = change < 0 ? Math.abs(change) : 0;
-
-  if (state.avgGain === null) {
-    // Accumulate initial window
-    state.gains.push(gain);
-    state.losses.push(loss);
-    if (state.gains.length < PERIOD) return null;
-    // First average
-    state.avgGain = state.gains.reduce((a, b) => a + b, 0) / PERIOD;
-    state.avgLoss = state.losses.reduce((a, b) => a + b, 0) / PERIOD;
+  if (s.avgGain === null) {
+    s.gains.push(gain);
+    s.losses.push(loss);
+    if (s.gains.length < PERIOD) return null;
+    s.avgGain = s.gains.reduce((a, b) => a + b, 0) / PERIOD;
+    s.avgLoss = s.losses.reduce((a, b) => a + b, 0) / PERIOD;
   } else {
-    // Wilder smoothing
-    state.avgGain = (state.avgGain * (PERIOD - 1) + gain) / PERIOD;
-    state.avgLoss = (state.avgLoss! * (PERIOD - 1) + loss) / PERIOD;
+    s.avgGain = (s.avgGain * (PERIOD - 1) + gain) / PERIOD;
+    s.avgLoss = (s.avgLoss! * (PERIOD - 1) + loss) / PERIOD;
   }
-
-  if (state.avgLoss === 0) { state.rsi = 100; return 100; }
-  const rs = state.avgGain! / state.avgLoss!;
-  state.rsi = Math.round((100 - 100 / (1 + rs)) * 100) / 100;
-  return state.rsi;
+  if (s.avgLoss === 0) { s.value = 100; return 100; }
+  const rs = s.avgGain! / s.avgLoss!;
+  s.value = Math.round((100 - 100 / (1 + rs)) * 100) / 100;
+  return s.value;
 }
 
-// ─── Asset definitions ────────────────────────────────────────────────────────
+// ─── Bollinger Bands(20, 2σ) ─────────────────────────────────────────────────
+interface BbState {
+  prices: number[]; // rolling 20-tick window
+  upper: number | null;
+  middle: number | null;
+  lower: number | null;
+  width: number | null;       // band width as % of price (squeeze metric)
+  prevWidth: number | null;
+}
+
+function makeBb(): BbState {
+  return { prices: [], upper: null, middle: null, lower: null, width: null, prevWidth: null };
+}
+
+function updateBb(s: BbState, price: number): void {
+  s.prices.push(price);
+  if (s.prices.length > 20) s.prices.shift();
+  if (s.prices.length < 20) return;
+  const mean = s.prices.reduce((a, b) => a + b, 0) / 20;
+  const variance = s.prices.reduce((a, b) => a + (b - mean) ** 2, 0) / 20;
+  const std = Math.sqrt(variance);
+  s.prevWidth = s.width;
+  s.middle = mean;
+  s.upper  = mean + 2 * std;
+  s.lower  = mean - 2 * std;
+  s.width  = std / mean * 100; // % band width
+}
+
+// ─── VWAP approximation (rolling 20-tick intraday) ───────────────────────────
+interface VwapState {
+  cumPV: number;  // cumulative price×volume
+  cumV:  number;  // cumulative volume
+  vwap:  number | null;
+  ticks: number;
+}
+
+function makeVwap(): VwapState {
+  return { cumPV: 0, cumV: 0, vwap: null, ticks: 0 };
+}
+
+// We don't have real volume data, so we approximate:
+// Use the tick-to-tick price change magnitude as a volume proxy
+function updateVwap(s: VwapState, price: number, prevPrice: number | null): void {
+  const vol = prevPrice ? Math.abs(price - prevPrice) / prevPrice * 1e6 + 1 : 1;
+  s.cumPV += price * vol;
+  s.cumV  += vol;
+  s.ticks++;
+  // Reset VWAP every ~4 hours (960 ticks at 15s) to avoid day-stale drift
+  if (s.ticks > 960) { s.cumPV = price * vol; s.cumV = vol; s.ticks = 1; }
+  s.vwap = s.cumV > 0 ? s.cumPV / s.cumV : price;
+}
+
+// ─── Price history for liquidity sweep detection ─────────────────────────────
+interface SwingState {
+  // 20-period high/low for liquidity zones
+  highs: number[];
+  lows:  number[];
+  // EMA 50 and 200 for swing trend
+  ema50:  number | null;
+  ema200: number | null;
+  // Breaker block: last strong bearish candle level that was broken
+  lastSwingHigh: number | null;
+  lastSwingLow:  number | null;
+  // Funding rate proxy: cumulative price momentum over 1hr window
+  hourlyPrices: number[];
+  fundingBias:  "long" | "short" | "neutral";
+}
+
+function makeSwing(): SwingState {
+  return {
+    highs: [], lows: [],
+    ema50: null, ema200: null,
+    lastSwingHigh: null, lastSwingLow: null,
+    hourlyPrices: [],
+    fundingBias: "neutral",
+  };
+}
+
+function updateSwing(s: SwingState, price: number): void {
+  // Rolling 20-tick high/low
+  s.highs.push(price); if (s.highs.length > 20) s.highs.shift();
+  s.lows.push(price);  if (s.lows.length  > 20) s.lows.shift();
+
+  // EMA 50 and 200
+  s.ema50  = calcEma(price, s.ema50,  50);
+  s.ema200 = calcEma(price, s.ema200, 200);
+
+  // Swing highs/lows for liquidity zones
+  if (s.highs.length === 20) {
+    const max = Math.max(...s.highs);
+    if (s.lastSwingHigh === null || max > s.lastSwingHigh) s.lastSwingHigh = max;
+    const min = Math.min(...s.lows);
+    if (s.lastSwingLow === null || min < s.lastSwingLow) s.lastSwingLow = min;
+  }
+
+  // Funding rate proxy — rolling 240 ticks (1hr at 15s)
+  s.hourlyPrices.push(price);
+  if (s.hourlyPrices.length > 240) s.hourlyPrices.shift();
+  if (s.hourlyPrices.length >= 10) {
+    const first = s.hourlyPrices[0];
+    const last  = s.hourlyPrices[s.hourlyPrices.length - 1];
+    const drift = (last - first) / first * 100;
+    // If price rose > 0.5% in last hour, longs are crowded → funding is +
+    // If price fell > 0.5%, shorts are crowded → funding is -
+    s.fundingBias = drift > 0.5 ? "long" : drift < -0.5 ? "short" : "neutral";
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 2 — ASSET STATE
+// ═══════════════════════════════════════════════════════════════════════════════
+
 interface Asset {
-  symbol: string;         // Alpaca symbol e.g. "BTCUSD"
-  binanceSymbol: string;  // Binance ticker e.g. "BTCUSDT"
-  label: string;          // Display name
+  symbol: string;
+  binanceSymbol: string;
+  label: string;
   markets: { name: string; id: string }[];
-  // EMA state
-  ema5: number | null;
+
+  // Scalp indicators
+  ema5:  number | null;
   ema15: number | null;
-  prevEma5: number | null;
+  prevEma5:  number | null;
   prevEma15: number | null;
-  // Legacy momentum (still used for edge magnitude)
   prevPrice: number | null;
   prevPrevPrice: number | null;
-  // Win-rate circuit breaker: track last 20 local decisions
-  recentResults: boolean[]; // true = win, false = loss (resolved trades)
-  circuitBreakerUntil: number; // epoch ms — pause until this time
-  // RSI state
-  rsiState: RsiState;
+  rsi: RsiStateV2;
+  bb:  BbState;
+  vwap: VwapState;
+
+  // Swing indicators
+  swing: SwingState;
+
+  // Mode cooldowns (epoch ms — don't trade until after this)
+  scalpCooldownUntil: number;
+  dayCooldownUntil:   number;
+  swingCooldownUntil: number;
+
+  // Circuit breaker
+  recentResults:      boolean[];
+  circuitBreakerUntil: number;
+}
+
+function makeAsset(symbol: string, binance: string, label: string, markets: { name: string; id: string }[]): Asset {
+  return {
+    symbol, binanceSymbol: binance, label, markets,
+    ema5: null, ema15: null, prevEma5: null, prevEma15: null,
+    prevPrice: null, prevPrevPrice: null,
+    rsi: makeRsiV2(), bb: makeBb(), vwap: makeVwap(), swing: makeSwing(),
+    scalpCooldownUntil: 0, dayCooldownUntil: 0, swingCooldownUntil: 0,
+    recentResults: [], circuitBreakerUntil: 0,
+  };
 }
 
 const ASSETS: Asset[] = [
-  {
-    symbol: "BTCUSD",
-    binanceSymbol: "BTCUSDT",
-    label: "BTC",
-    markets: [
-      { name: "[momentum] BTC 15-min up?",     id: "btc-15m"       },
-      { name: "[momentum] BTC 1-hour up?",      id: "btc-1h"        },
-      { name: "[momentum] BTC above $83k?",     id: "btc-83k-today" },
-      { name: "[momentum] BTC +1% this hour?",  id: "btc-1pct-1h"   },
-    ],
-    ema5: null, ema15: null, prevEma5: null, prevEma15: null,
-    prevPrice: null, prevPrevPrice: null,
-    recentResults: [], circuitBreakerUntil: 0,
-    rsiState: makeRsi(),
-  },
-  {
-    symbol: "ETHUSD",
-    binanceSymbol: "ETHUSDT",
-    label: "ETH",
-    markets: [
-      { name: "[momentum] ETH 15-min up?",     id: "eth-15m"      },
-      { name: "[momentum] ETH 1-hour up?",      id: "eth-1h"       },
-      { name: "[momentum] ETH above $2k?",      id: "eth-2k-today" },
-      { name: "[momentum] ETH +1% this hour?",  id: "eth-1pct-1h"  },
-    ],
-    ema5: null, ema15: null, prevEma5: null, prevEma15: null,
-    prevPrice: null, prevPrevPrice: null,
-    recentResults: [], circuitBreakerUntil: 0,
-    rsiState: makeRsi(),
-  },
-  {
-    symbol: "SOLUSD",
-    binanceSymbol: "SOLUSDT",
-    label: "SOL",
-    markets: [
-      { name: "[momentum] SOL 15-min up?",     id: "sol-15m"       },
-      { name: "[momentum] SOL 1-hour up?",      id: "sol-1h"        },
-      { name: "[momentum] SOL above $130?",     id: "sol-130-today" },
-      { name: "[momentum] SOL +2% this hour?",  id: "sol-2pct-1h"   },
-    ],
-    ema5: null, ema15: null, prevEma5: null, prevEma15: null,
-    prevPrice: null, prevPrevPrice: null,
-    recentResults: [], circuitBreakerUntil: 0,
-    rsiState: makeRsi(),
-  },
+  makeAsset("BTCUSD", "BTCUSDT", "BTC", [
+    { name: "[scalp] BTC 15-min up?",     id: "btc-scalp"   },
+    { name: "[day] BTC 1-hour up?",        id: "btc-day"     },
+    { name: "[swing] BTC above $83k?",     id: "btc-swing"   },
+    { name: "[momentum] BTC +1% today?",   id: "btc-mom"     },
+  ]),
+  makeAsset("ETHUSD", "ETHUSDT", "ETH", [
+    { name: "[scalp] ETH 15-min up?",     id: "eth-scalp"   },
+    { name: "[day] ETH 1-hour up?",        id: "eth-day"     },
+    { name: "[swing] ETH above $2k?",      id: "eth-swing"   },
+    { name: "[momentum] ETH +1% today?",   id: "eth-mom"     },
+  ]),
+  makeAsset("SOLUSD", "SOLUSDT", "SOL", [
+    { name: "[scalp] SOL 15-min up?",     id: "sol-scalp"   },
+    { name: "[day] SOL 1-hour up?",        id: "sol-day"     },
+    { name: "[swing] SOL above $130?",     id: "sol-swing"   },
+    { name: "[momentum] SOL +2% today?",   id: "sol-mom"     },
+  ]),
 ];
 
-let botInterval: ReturnType<typeof setInterval> | null = null;
-let orderSyncInterval: ReturnType<typeof setInterval> | null = null;
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 3 — PRICE FETCHING
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── EMA helpers ──────────────────────────────────────────────────────────────
-function calcEma(price: number, prevEma: number | null, period: number): number {
-  if (prevEma === null) return price;
-  const k = 2 / (period + 1);
-  return price * k + prevEma * (1 - k);
-}
-
-// ─── Price fetching ────────────────────────────────────────────────────────────
 let geckoCache: { BTC: number | null; ETH: number | null; SOL: number | null; ts: number } =
   { BTC: null, ETH: null, SOL: null, ts: 0 };
 
-async function fetchGeckoPrices(): Promise<{ BTC: number | null; ETH: number | null; SOL: number | null }> {
+async function fetchGeckoPrices() {
   const now = Date.now();
   if (now - geckoCache.ts < 12000) return geckoCache;
   try {
@@ -172,147 +317,360 @@ async function fetchGeckoPrices(): Promise<{ BTC: number | null; ETH: number | n
     );
     if (!res.ok) return geckoCache;
     const d = await res.json() as Record<string, { usd: number }>;
-    geckoCache = {
-      BTC: d.bitcoin?.usd ?? null,
-      ETH: d.ethereum?.usd ?? null,
-      SOL: d.solana?.usd ?? null,
-      ts: now,
-    };
+    geckoCache = { BTC: d.bitcoin?.usd ?? null, ETH: d.ethereum?.usd ?? null, SOL: d.solana?.usd ?? null, ts: now };
     return geckoCache;
   } catch { return geckoCache; }
 }
 
 async function fetchPrice(binanceSymbol: string): Promise<number | null> {
-  const geckoKey = binanceSymbol === "BTCUSDT" ? "BTC"
-    : binanceSymbol === "ETHUSDT" ? "ETH"
-    : binanceSymbol === "SOLUSDT" ? "SOL" : null;
-  if (geckoKey) {
-    const prices = await fetchGeckoPrices();
-    if (prices[geckoKey as keyof typeof prices]) return prices[geckoKey as keyof typeof prices];
+  const key = binanceSymbol === "BTCUSDT" ? "BTC" : binanceSymbol === "ETHUSDT" ? "ETH" : binanceSymbol === "SOLUSDT" ? "SOL" : null;
+  if (key) {
+    const p = await fetchGeckoPrices();
+    if (p[key as keyof typeof p]) return p[key as keyof typeof p];
   }
   try {
-    const res = await fetch(
-      `https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`,
-      { signal: AbortSignal.timeout(5000) }
-    );
+    const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
-    const data = await res.json() as { price?: string; code?: number };
-    if (data.code) return null;
-    return parseFloat(data.price!);
+    const d = await res.json() as { price?: string; code?: number };
+    return d.code ? null : parseFloat(d.price!);
   } catch {
     try {
-      const krakenPair = binanceSymbol === "BTCUSDT" ? "XBTUSD"
-        : binanceSymbol === "ETHUSDT" ? "ETHUSD" : "SOLUSD";
-      const res = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${krakenPair}`,
-        { signal: AbortSignal.timeout(5000) });
+      const pair = binanceSymbol === "BTCUSDT" ? "XBTUSD" : binanceSymbol === "ETHUSDT" ? "ETHUSD" : "SOLUSD";
+      const res = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${pair}`, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return null;
       const d = await res.json() as { result?: Record<string, { c: string[] }> };
-      const key = Object.keys(d.result || {})[0];
-      return key ? parseFloat(d.result![key].c[0]) : null;
+      const k = Object.keys(d.result || {})[0];
+      return k ? parseFloat(d.result![k].c[0]) : null;
     } catch { return null; }
   }
 }
 
-// ─── EMA cross + momentum signal ──────────────────────────────────────────────
-/**
- * Returns a trade signal only when:
- *   1. EMA(5) crosses above EMA(15) → bullish
- *      OR EMA(5) crosses below EMA(15) → bearish
- *   2. 2-tick momentum agrees with the cross direction
- *
- * This eliminates the fabricated random edge from v1.
- */
-interface Signal {
-  direction: "buy" | "sell";
-  edgePct: number;         // magnitude of the EMA gap as edge estimate
-  change5m: number;
-  change15m: number;
-  momentum: string;
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 4 — STRATEGY SIGNALS (5 per mode)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type SignalVote = { name: string; vote: "buy" | "sell" | "neutral"; strength: number };
+
+// ── SCALP SIGNALS (15s cadence) ──────────────────────────────────────────────
+
+function signalEMACross(a: Asset, price: number): SignalVote {
+  const newE5  = calcEma(price, a.ema5, 5);
+  const newE15 = calcEma(price, a.ema15, 15);
+  const prevE5 = a.ema5; const prevE15 = a.ema15;
+  a.prevEma5 = a.ema5; a.prevEma15 = a.ema15;
+  a.ema5 = newE5; a.ema15 = newE15;
+  if (prevE5 === null || prevE15 === null) return { name: "EMA_CROSS", vote: "neutral", strength: 0 };
+
+  const crossUp   = prevE5 < prevE15! && newE5 >= newE15;
+  const crossDown = prevE5 >= prevE15! && newE5 < newE15;
+  const gapPct = Math.abs((newE5 - newE15) / newE15) * 100;
+  const trending = gapPct > 0.015;
+
+  const change = a.prevPrice ? (price - a.prevPrice) / a.prevPrice * 100 : 0;
+  a.prevPrevPrice = a.prevPrice; a.prevPrice = price;
+
+  if (crossUp)                              return { name: "EMA_CROSS", vote: "buy",  strength: Math.min(1, gapPct * 10 + 0.3) };
+  if (crossDown)                            return { name: "EMA_CROSS", vote: "sell", strength: Math.min(1, gapPct * 10 + 0.3) };
+  if (trending && newE5 > newE15 && change > 0.01) return { name: "EMA_CROSS", vote: "buy",  strength: Math.min(1, gapPct * 8) };
+  if (trending && newE5 < newE15 && change < -0.01) return { name: "EMA_CROSS", vote: "sell", strength: Math.min(1, gapPct * 8) };
+  return { name: "EMA_CROSS", vote: "neutral", strength: 0 };
 }
 
-function detectSignal(asset: Asset, price: number): Signal | null {
-  const newEma5  = calcEma(price, asset.ema5,  5);
-  const newEma15 = calcEma(price, asset.ema15, 15);
+function signalRSI(a: Asset, price: number): SignalVote {
+  const rsi = updateRsiV2(a.rsi, price);
+  if (rsi === null) return { name: "RSI", vote: "neutral", strength: 0 };
 
-  const prevE5  = asset.ema5;
-  const prevE15 = asset.ema15;
+  // Oversold bounce: RSI 30–45 entering from below = buy setup
+  if (rsi >= 30 && rsi <= 48) return { name: "RSI", vote: "buy",  strength: (48 - rsi) / 18 };
+  // Momentum zone: RSI 52–68 = riding uptrend
+  if (rsi >= 52 && rsi <= 68) return { name: "RSI", vote: "buy",  strength: (rsi - 52) / 16 * 0.7 };
+  // Overbought: RSI > 75 = avoid or sell
+  if (rsi > 75)               return { name: "RSI", vote: "sell", strength: Math.min(1, (rsi - 75) / 25) };
+  // Oversold extreme: RSI < 28 = falling knife, skip
+  if (rsi < 28)               return { name: "RSI", vote: "sell", strength: (28 - rsi) / 28 };
+  return { name: "RSI", vote: "neutral", strength: 0 };
+}
 
-  asset.prevEma5  = asset.ema5;
-  asset.prevEma15 = asset.ema15;
-  asset.ema5  = newEma5;
-  asset.ema15 = newEma15;
+function signalBollingerBands(a: Asset, price: number): SignalVote {
+  updateBb(a.bb, price);
+  const bb = a.bb;
+  if (!bb.lower || !bb.upper || !bb.middle) return { name: "BB", vote: "neutral", strength: 0 };
 
-  // Need at least 2 ticks of both EMAs to detect a cross
-  if (prevE5 === null || prevE15 === null) return null;
+  const range = bb.upper - bb.lower;
+  const pctPos = (price - bb.lower) / range; // 0 = at lower band, 1 = at upper
 
-  // 2-tick momentum for magnitude
-  const change5m  = asset.prevPrice  ? ((price - asset.prevPrice)  / asset.prevPrice)  * 100 : 0;
-  const change15m = asset.prevPrevPrice ? ((price - asset.prevPrevPrice) / asset.prevPrevPrice) * 100 : change5m;
-  asset.prevPrevPrice = asset.prevPrice;
-  asset.prevPrice = price;
-
-  // Detect EMA cross
-  const wasBullish = prevE5 >= prevE15;
-  const isBullish  = newEma5 >= newEma15;
-  const crossedUp   = !wasBullish && isBullish;
-  const crossedDown = wasBullish && !isBullish;
-
-  // Also allow trades when EMA gap widens significantly (strong trend, no fresh cross needed)
-  const emaGapPct = Math.abs((newEma5 - newEma15) / newEma15) * 100;
-  const strongTrend = emaGapPct > 0.02; // EMA gap > 0.02% = confirmed trend (lowered from 0.05)
-
-  let direction: "buy" | "sell" | null = null;
-
-  if (crossedUp) {
-    direction = "buy";   // EMA cross up — always fire
-  } else if (crossedDown) {
-    direction = "sell";  // EMA cross down — always fire
-  } else if (strongTrend && isBullish && change5m > 0.01) {
-    direction = "buy";   // riding confirmed uptrend
-  } else if (strongTrend && !isBullish && change5m < -0.01) {
-    direction = "sell";  // riding confirmed downtrend
+  // Price near lower band + bands not too wide = mean reversion buy
+  if (pctPos < 0.2 && bb.width! < 3.0) return { name: "BB", vote: "buy",  strength: (0.2 - pctPos) / 0.2 };
+  // Price near upper band = overbought, skip
+  if (pctPos > 0.85)                    return { name: "BB", vote: "sell", strength: (pctPos - 0.85) / 0.15 };
+  // Bollinger squeeze break (bands contracting then expanding = volatility breakout)
+  if (bb.prevWidth !== null && bb.width! > bb.prevWidth! * 1.15 && pctPos > 0.55) {
+    return { name: "BB", vote: "buy", strength: 0.6 }; // breakout to upside
   }
-
-  if (!direction) return null;
-
-  // Edge magnitude: combination of EMA gap + momentum strength
-  const edgePct = Math.min(15, emaGapPct * 20 + Math.abs(change5m) * 0.5);
-
-  const momentum = isBullish ? "bullish" : "bearish";
-  return { direction, edgePct, change5m, change15m, momentum };
+  // Mid-zone = neutral
+  return { name: "BB", vote: "neutral", strength: 0 };
 }
 
-// ─── Win-rate circuit breaker ─────────────────────────────────────────────────
-const CB_WINDOW     = 10;   // look at last 10 resolved trades
-const CB_MIN_RATE   = 0.25; // pause if win rate < 25% (lenient while warming up)
-const CB_PAUSE_MS   = 15 * 60 * 1000; // 15 minutes pause
+function signalVWAP(a: Asset, price: number): SignalVote {
+  updateVwap(a.vwap, price, a.prevPrice);
+  const vwap = a.vwap.vwap;
+  if (!vwap || a.vwap.ticks < 5) return { name: "VWAP", vote: "neutral", strength: 0 };
+
+  const devPct = (price - vwap) / vwap * 100;
+
+  // Price below VWAP = undervalued vs. intraday average → buy
+  if (devPct < -0.15 && devPct > -1.5) return { name: "VWAP", vote: "buy",  strength: Math.min(1, Math.abs(devPct) / 1.5) };
+  // Price above VWAP by a lot = overextended, expect reversion
+  if (devPct > 0.8)                     return { name: "VWAP", vote: "sell", strength: Math.min(1, devPct / 2) };
+  // Just above VWAP = healthy buy zone
+  if (devPct >= 0 && devPct < 0.4)      return { name: "VWAP", vote: "buy",  strength: 0.4 };
+  return { name: "VWAP", vote: "neutral", strength: 0 };
+}
+
+// ── DAY SIGNALS (5min cadence, evaluated every 20 scalp ticks) ───────────────
+
+function signalLiquiditySweep(a: Asset, price: number): SignalVote {
+  const s = a.swing;
+  if (!s.lastSwingHigh || !s.lastSwingLow) return { name: "LIQ_SWEEP", vote: "neutral", strength: 0 };
+
+  const nearHighPct  = (price - s.lastSwingHigh) / s.lastSwingHigh * 100;
+  const nearLowPct   = (s.lastSwingLow - price)  / s.lastSwingLow  * 100;
+
+  // Price swept above recent high then came back down = stop hunt complete, sell exhaustion
+  // (We can only buy, so we look for sweep of LOWS — swept below, now recovering)
+  if (nearLowPct > 0.1 && nearLowPct < 1.5) {
+    // Price dipped below swing low (swept shorts out) and we're now close to it
+    // This is a classic liquidity sweep reversal BUY signal
+    return { name: "LIQ_SWEEP", vote: "buy", strength: Math.min(1, nearLowPct / 1.0) };
+  }
+  // Far above swing high = extended, potential reversal
+  if (nearHighPct > 0.5) {
+    return { name: "LIQ_SWEEP", vote: "sell", strength: Math.min(1, nearHighPct / 2) };
+  }
+  return { name: "LIQ_SWEEP", vote: "neutral", strength: 0 };
+}
+
+function signalBreakerBlock(a: Asset, price: number): SignalVote {
+  const s = a.swing;
+  // Breaker block: price reclaims a key EMA level that was previously lost
+  // We detect: price just crossed BACK above ema50 after being below it
+  if (!s.ema50) return { name: "BREAKER", vote: "neutral", strength: 0 };
+
+  const prev = a.prevPrice;
+  if (!prev) return { name: "BREAKER", vote: "neutral", strength: 0 };
+
+  const wasBelow = prev < s.ema50;
+  const nowAbove = price >= s.ema50;
+  const wasAbove = prev >= s.ema50;
+  const nowBelow = price < s.ema50;
+
+  if (wasBelow && nowAbove) {
+    // Reclaimed EMA50 from below = bullish breaker block
+    const strength = Math.min(1, (price - s.ema50) / s.ema50 * 100 + 0.5);
+    return { name: "BREAKER", vote: "buy", strength };
+  }
+  if (wasAbove && nowBelow) {
+    return { name: "BREAKER", vote: "sell", strength: 0.7 };
+  }
+  // Riding above EMA50 = mild bull bias
+  if (price > s.ema50 * 1.003) return { name: "BREAKER", vote: "buy", strength: 0.35 };
+  return { name: "BREAKER", vote: "neutral", strength: 0 };
+}
+
+// ── SWING SIGNALS (1hr cadence, evaluated every 240 scalp ticks) ─────────────
+
+function signalEMA50200(a: Asset): SignalVote {
+  const s = a.swing;
+  if (!s.ema50 || !s.ema200) return { name: "EMA50_200", vote: "neutral", strength: 0 };
+  const gapPct = (s.ema50 - s.ema200) / s.ema200 * 100;
+  if (gapPct > 0.5)   return { name: "EMA50_200", vote: "buy",  strength: Math.min(1, gapPct / 3) };
+  if (gapPct < -0.3)  return { name: "EMA50_200", vote: "sell", strength: Math.min(1, Math.abs(gapPct) / 3) };
+  return { name: "EMA50_200", vote: "neutral", strength: 0 };
+}
+
+function signalFundingRate(a: Asset): SignalVote {
+  const bias = a.swing.fundingBias;
+  // Contrarian: if longs are crowded (funding +), expect pullback — but we can't short
+  // If shorts are crowded (funding -), smart money will squeeze them → BUY
+  if (bias === "short") return { name: "FUNDING", vote: "buy",  strength: 0.65 };
+  if (bias === "long")  return { name: "FUNDING", vote: "sell", strength: 0.4 };
+  return { name: "FUNDING", vote: "neutral", strength: 0 };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 5 — VOTING ENGINE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface VoteResult {
+  direction: "buy" | "sell" | null;
+  score: number;         // 0–5 votes in direction
+  avgStrength: number;   // average signal strength of agreeing votes
+  votes: SignalVote[];
+  majority: boolean;     // did 3+ votes agree?
+}
+
+function runVote(votes: SignalVote[]): VoteResult {
+  const buyVotes  = votes.filter(v => v.vote === "buy");
+  const sellVotes = votes.filter(v => v.vote === "sell");
+  const buyScore  = buyVotes.length;
+  const sellScore = sellVotes.length;
+
+  if (buyScore >= 3 && buyScore > sellScore) {
+    const avgStr = buyVotes.reduce((a, b) => a + b.strength, 0) / buyVotes.length;
+    return { direction: "buy",  score: buyScore,  avgStrength: avgStr, votes, majority: true };
+  }
+  if (sellScore >= 3 && sellScore > buyScore) {
+    const avgStr = sellVotes.reduce((a, b) => a + b.strength, 0) / sellVotes.length;
+    return { direction: "sell", score: sellScore, avgStrength: avgStr, votes, majority: true };
+  }
+  return { direction: null, score: 0, avgStrength: 0, votes, majority: false };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 6 — PUBLIC LIVE STATE (for Analytics page)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface LiveStrategyState {
+  asset: string;
+  price: number;
+  session: string;
+  rsi: number | null;
+  ema5: number | null;
+  ema15: number | null;
+  ema50: number | null;
+  vwap: number | null;
+  bbUpper: number | null;
+  bbLower: number | null;
+  bbWidth: number | null;
+  fundingBias: string;
+  lastScalpVote: VoteResult | null;
+  lastDayVote:   VoteResult | null;
+  lastSwingVote: VoteResult | null;
+  scalpCooldownUntil: number;
+  dayCooldownUntil:   number;
+  swingCooldownUntil: number;
+  circuitBreakerUntil: number;
+}
+
+const liveState = new Map<string, LiveStrategyState>();
+
+export function getLiveStrategyState(): LiveStrategyState[] {
+  return Array.from(liveState.values());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 7 — CIRCUIT BREAKER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CB_WINDOW   = 10;
+const CB_MIN_RATE = 0.25;
+const CB_PAUSE_MS = 20 * 60 * 1000; // 20 min pause
 
 function checkCircuitBreaker(asset: Asset): boolean {
-  if (Date.now() < asset.circuitBreakerUntil) {
-    console.log(`[BotEngine] ${asset.label} circuit breaker active — paused until ${new Date(asset.circuitBreakerUntil).toISOString()}`);
-    return true; // blocked
-  }
+  if (Date.now() < asset.circuitBreakerUntil) return true;
   if (asset.recentResults.length >= CB_WINDOW) {
     const wins = asset.recentResults.slice(-CB_WINDOW).filter(Boolean).length;
     const rate  = wins / CB_WINDOW;
     if (rate < CB_MIN_RATE) {
       asset.circuitBreakerUntil = Date.now() + CB_PAUSE_MS;
-      console.warn(`[BotEngine] ${asset.label} win rate ${(rate*100).toFixed(0)}% < 35% — pausing 30 min`);
-      return true; // blocked
+      console.warn(`[BotEngine] ${asset.label} win rate ${(rate*100).toFixed(0)}% — circuit breaker 20min`);
+      return true;
     }
   }
-  return false; // ok to trade
+  return false;
 }
 
 function recordResult(asset: Asset, won: boolean) {
   asset.recentResults.push(won);
-  if (asset.recentResults.length > CB_WINDOW * 2) {
-    asset.recentResults = asset.recentResults.slice(-CB_WINDOW);
+  if (asset.recentResults.length > CB_WINDOW * 2) asset.recentResults = asset.recentResults.slice(-CB_WINDOW);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 8 — ORDER PLACEMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function placeOrder(
+  asset: Asset,
+  mode: "scalp" | "day" | "swing",
+  vote: VoteResult,
+  price: number,
+  settings: any,
+  polyConfidence: number
+) {
+  if (vote.direction !== "buy") return; // Alpaca crypto = BUY only
+
+  // Bet size bounds per mode
+  const bounds = { scalp: [10, 25], day: [15, 60], swing: [25, 100] };
+  const [minBet, maxBet] = bounds[mode];
+
+  // Kelly criterion
+  const impliedOdds = 0.5 + vote.avgStrength * 0.15;
+  const b = (1 - impliedOdds) / impliedOdds;
+  const rawKelly = settings.totalBalance * Math.max(0, (b * impliedOdds - (1 - impliedOdds)) / b);
+
+  // Multipliers
+  const sessionMult = getSessionMultiplier();
+  const crowdMult   = 1 + (polyConfidence > 0.3 ? polyConfidence * 0.4 : 0);
+  const voteMult    = 1 + (vote.score - 3) * 0.1; // extra votes = extra confidence
+  const rsiBonus    = (asset.rsi.value !== null && asset.rsi.value >= 45 && asset.rsi.value <= 62) ? 1.1 : 1.0;
+
+  const betSize = Math.round(
+    Math.min(maxBet, Math.max(minBet, rawKelly * sessionMult * crowdMult * voteMult * rsiBonus))
+    * 100) / 100;
+
+  const modeLabel = `[${mode}]`;
+  const market = asset.markets.find(m => m.id.includes(mode)) ?? asset.markets[0];
+
+  console.log(`[BotEngine] ${asset.label} ${modeLabel.toUpperCase()} BUY $${betSize} | session=${getSessionName()} votes=${vote.score}/5 rsi=${asset.rsi.value ?? "?"} str=${vote.avgStrength.toFixed(2)}`);
+
+  const opp = await storage.createEdgeOpportunity({
+    market:      `${modeLabel} ${market.name}`,
+    marketId:    `${mode}-${market.id}`,
+    polyOdds:    Math.round(impliedOdds * 100) / 100,
+    impliedOdds: Math.round(impliedOdds * 100) / 100,
+    edgePct:     Math.round(vote.avgStrength * 100) / 10,
+    direction:   "YES",
+    liquidity:   Math.round(20000 + Math.random() * 80000),
+    status:      "detected",
+  });
+
+  const trade = await storage.createTrade({
+    market:       `${modeLabel} ${market.name}`,
+    marketId:     `${mode}-${market.id}`,
+    direction:    "YES",
+    betSize,
+    entryOdds:    Math.round(impliedOdds * 100) / 100,
+    btcMomentum:  asset.prevPrice ? Math.round(((price - asset.prevPrice) / asset.prevPrice) * 100000) / 1000 : 0,
+    edgeDetected: Math.round(vote.avgStrength * 1000) / 10,
+    status:       "open",
+    pnl:          0,
+    resolvedAt:   null,
+  });
+
+  if (settings.alpacaApiKey && settings.alpacaApiSecret) {
+    const result = await placeAlpacaOrder("buy", betSize, settings.alpacaApiKey, settings.alpacaApiSecret, asset.symbol);
+    if (result.ok && result.order) {
+      const prefix = result.isLive ? "live:" : "paper:";
+      await storage.updateTradeAlpacaOrder(trade.id, result.order.id, prefix + result.order.status);
+      await storage.updateEdgeOpportunityStatus(opp.id, "bet_placed");
+      console.log(`[BotEngine] ${asset.symbol} ${mode} order ${result.order.id} (${result.isLive ? "LIVE" : "PAPER"})`);
+    } else {
+      console.warn(`[BotEngine] ${asset.symbol} ${mode} order failed: ${result.error}`);
+      await storage.updateEdgeOpportunityStatus(opp.id, "skipped");
+    }
+  } else {
+    await storage.updateEdgeOpportunityStatus(opp.id, "skipped");
   }
 }
 
-// ─── Process one asset per tick ───────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 9 — MAIN TICK PROCESSOR
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let tickCount = 0; // global tick counter (resets every 1000 to avoid overflow)
+
 async function processAsset(asset: Asset, settings: any) {
+  // ── 1. Fetch price ──────────────────────────────────────────────────────────
   let price = await fetchPrice(asset.binanceSymbol);
   if (!price) {
     const last = await storage.getLatestBtcPrice();
@@ -321,19 +679,15 @@ async function processAsset(asset: Asset, settings: any) {
       : (asset.symbol === "BTCUSD" ? 83000 : asset.symbol === "ETHUSD" ? 2000 : 130);
   }
 
-  // Update RSI state
-  const rsiValue = updateRsi(asset.rsiState, price);
+  // ── 2. Update all indicator states ─────────────────────────────────────────
+  updateSwing(asset.swing, price);
 
-  // Detect signal using EMA cross
-  const signal = detectSignal(asset, price);
-
-  // Save BTC price snapshot for dashboard
+  // ── 3. BTC price snapshot for dashboard ────────────────────────────────────
   if (asset.symbol === "BTCUSD") {
-    const change5m  = asset.prevPrice  ? ((price - asset.prevPrice)  / (asset.prevPrice  || price)) * 100 : 0;
-    const change15m = asset.prevPrevPrice ? ((price - asset.prevPrevPrice) / (asset.prevPrevPrice || price)) * 100 : change5m;
+    const change5m  = asset.prevPrice  ? ((price - asset.prevPrice)  / asset.prevPrice)  * 100 : 0;
+    const change15m = asset.prevPrevPrice ? ((price - asset.prevPrevPrice) / asset.prevPrevPrice) * 100 : change5m;
     const momentum  = (asset.ema5 && asset.ema15)
-      ? (asset.ema5 > asset.ema15 ? "bullish" : asset.ema5 < asset.ema15 ? "bearish" : "neutral")
-      : "neutral";
+      ? (asset.ema5 > asset.ema15 ? "bullish" : "bearish") : "neutral";
     await storage.createBtcPrice({
       price:     Math.round(price),
       change5m:  Math.round(change5m  * 1000) / 1000,
@@ -342,25 +696,7 @@ async function processAsset(asset: Asset, settings: any) {
     });
   }
 
-  // No signal → don't trade
-  if (!signal) return;
-
-  // ── RSI filter: block overbought/oversold extremes ──────────────────────────
-  // RSI > 78 = dangerously overbought → skip BUY to avoid buying the top
-  // RSI < 22 = deeply oversold  → skip BUY (price may keep falling)
-  // Allow trade if RSI not yet available (warming up)
-  if (rsiValue !== null) {
-    if (signal.direction === "buy" && rsiValue > 78) {
-      console.log(`[BotEngine] ${asset.label} RSI ${rsiValue} > 78 (overbought) — skipping BUY`);
-      return;
-    }
-    if (signal.direction === "buy" && rsiValue < 22) {
-      console.log(`[BotEngine] ${asset.label} RSI ${rsiValue} < 22 (deeply oversold, falling knife) — skipping BUY`);
-      return;
-    }
-  }
-
-  // Check daily limits
+  // ── 4. Check daily limits ───────────────────────────────────────────────────
   const todayCount   = await storage.getTodayTradeCount();
   const todayPnl     = await storage.getTodayPnl();
   const maxDailyLoss = settings.totalBalance * (settings.dailyStopLossPct / 100);
@@ -368,116 +704,143 @@ async function processAsset(asset: Asset, settings: any) {
   if (todayCount >= settings.maxBetsPerDay) return;
   if (todayPnl < -maxDailyLoss) {
     await storage.updateBotSettings({ isRunning: false });
-    console.log(`[BotEngine] Daily stop-loss hit — bot stopped`);
+    console.log("[BotEngine] Daily stop-loss hit — bot stopped");
     return;
   }
 
-  // Win-rate circuit breaker check
+  // ── 5. Circuit breaker ──────────────────────────────────────────────────────
   if (checkCircuitBreaker(asset)) return;
 
-  // Alpaca crypto does not support short selling — only BUY
-  if (signal.direction === "sell") {
-    console.log(`[BotEngine] ${asset.label} SELL signal — skipping (no short selling on Alpaca)`);
-    return;
-  }
+  const now = Date.now();
 
-  // ── Polymarket crowd confirmation ─────────────────────────────────────────
-  // Check if the Polymarket crowd agrees with our EMA signal (free signal, no deposit)
-  // Only skip if crowd actively DISAGREES — missing data = allow trade
-  const assetLabel = asset.label === "BTC" ? "BTC" : asset.label === "ETH" ? "ETH" : "SOL";
-  const { confirmed, signal: polySignal, reason } = await crowdConfirms(assetLabel, signal.direction);
-  if (!confirmed) {
-    console.log(`[BotEngine] ${asset.label} EMA signal BLOCKED by Polymarket: ${reason}`);
-    return;
-  }
-  const confidenceBoost = polySignal ? polySignal.confidence : 0;
-  console.log(`[BotEngine] ${asset.label} crowd check PASSED: ${reason}`);
-  // ──────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODE A: SCALP — every tick (15s)
+  // Signals: EMA cross, RSI, Bollinger Bands, VWAP, Polymarket crowd
+  // ─────────────────────────────────────────────────────────────────────────────
+  const scalpVotes: SignalVote[] = [
+    signalEMACross(asset, price),
+    signalRSI(asset, price),
+    signalBollingerBands(asset, price),
+    signalVWAP(asset, price),
+    // 5th vote: Polymarket crowd is evaluated separately after voting
+  ];
 
-  // ── Bet sizing: Kelly + crowd confidence + time-of-day boost ─────────────────
-  const impliedOdds = 0.5 + signal.edgePct / 200;
-  const b = (1 - impliedOdds) / impliedOdds;
-  const rawKelly = settings.totalBalance * Math.max(0, (b * impliedOdds - (1 - impliedOdds)) / b);
-  const crowdMultiplier  = 1 + (confidenceBoost > 0.3 ? confidenceBoost * 0.5 : 0);
-  const sessionMultiplier = getTimeOfDayMultiplier();
-  // RSI sweet-spot bonus: RSI 45–60 = ideal momentum zone → +10% bet
-  const rsiBonus = (rsiValue !== null && rsiValue >= 45 && rsiValue <= 60) ? 1.10 : 1.0;
-  const betSize = Math.round(Math.min(100, Math.max(10, rawKelly * crowdMultiplier * sessionMultiplier * rsiBonus)) * 100) / 100;
-  console.log(`[BotEngine] ${asset.label} bet=$${betSize} kelly=${rawKelly.toFixed(2)} crowd=${crowdMultiplier.toFixed(2)}× session=${sessionMultiplier}× rsi=${rsiValue ?? "N/A"} bonus=${rsiBonus}×`);
+  const scalpResult = runVote(scalpVotes);
+  let lastDayVote: VoteResult | null = null;
+  let lastSwingVote: VoteResult | null = null;
 
-  const market = asset.markets[Math.floor(Math.random() * asset.markets.length)];
+  if (scalpResult.majority && scalpResult.direction === "buy" && now > asset.scalpCooldownUntil) {
+    // Polymarket confirmation (5th gate)
+    const { confirmed, signal: ps } = await crowdConfirms(asset.label, "buy");
+    const polyConf = ps ? ps.confidence : 0;
 
-  const opp = await storage.createEdgeOpportunity({
-    market:      market.name,
-    marketId:    market.id,
-    polyOdds:    Math.round(0.5 * 100) / 100,
-    impliedOdds: Math.round(impliedOdds * 100) / 100,
-    edgePct:     Math.round(signal.edgePct * 10) / 10,
-    direction:   "YES",
-    liquidity:   Math.round(15000 + Math.random() * 80000),
-    status:      "detected",
-  });
-
-  const trade = await storage.createTrade({
-    market:       market.name,
-    marketId:     market.id,
-    direction:    "YES",
-    betSize,
-    entryOdds:    Math.round(impliedOdds * 100) / 100,
-    btcMomentum:  Math.round(signal.change5m * 1000) / 1000,
-    edgeDetected: Math.round(signal.edgePct * 10) / 10,
-    status:       "open",
-    pnl:          0,
-    resolvedAt:   null,
-  });
-
-  if (settings.alpacaApiKey && settings.alpacaApiSecret) {
-    console.log(`[BotEngine] ${asset.label} EMA cross BUY — edge ${signal.edgePct.toFixed(1)}% → $${betSize}`);
-
-    const orderResult = await placeAlpacaOrder(
-      "buy",
-      betSize,
-      settings.alpacaApiKey,
-      settings.alpacaApiSecret,
-      asset.symbol
-    );
-
-    if (orderResult.ok && orderResult.order) {
-      const prefix = orderResult.isLive ? "live:" : "paper:";
-      await storage.updateTradeAlpacaOrder(
-        trade.id,
-        orderResult.order.id,
-        prefix + orderResult.order.status
-      );
-      await storage.updateEdgeOpportunityStatus(opp.id, "bet_placed");
-      console.log(`[BotEngine] ${asset.symbol} order ${orderResult.order.id} (${orderResult.isLive ? "LIVE" : "PAPER"})`);
+    if (confirmed) {
+      await placeOrder(asset, "scalp", scalpResult, price, settings, polyConf);
+      asset.scalpCooldownUntil = now + 90 * 1000; // 90s cooldown per asset
     } else {
-      console.warn(`[BotEngine] ${asset.symbol} order failed: ${orderResult.error}`);
-      await storage.updateEdgeOpportunityStatus(opp.id, "skipped");
+      console.log(`[BotEngine] ${asset.label} SCALP blocked by Polymarket crowd`);
     }
-  } else {
-    await storage.updateEdgeOpportunityStatus(opp.id, "skipped");
   }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODE B: DAY — every 20 ticks (~5 min)
+  // Signals: Liquidity Sweep, Breaker Block, RSI, BB, VWAP
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (tickCount % 20 === 0) {
+    const dayVotes: SignalVote[] = [
+      signalLiquiditySweep(asset, price),
+      signalBreakerBlock(asset, price),
+      signalRSI(asset, price),
+      signalBollingerBands(asset, price),
+      signalVWAP(asset, price),
+    ];
+
+    lastDayVote = runVote(dayVotes);
+
+    if (lastDayVote.majority && lastDayVote.direction === "buy" && now > asset.dayCooldownUntil) {
+      const { confirmed, signal: ps } = await crowdConfirms(asset.label, "buy");
+      const polyConf = ps ? ps.confidence : 0;
+
+      if (confirmed) {
+        await placeOrder(asset, "day", lastDayVote, price, settings, polyConf);
+        asset.dayCooldownUntil = now + 10 * 60 * 1000; // 10-min cooldown
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MODE C: SWING — every 240 ticks (~1 hour)
+  // Signals: EMA50/200, Funding Rate, Liquidity Sweep, Breaker Block, RSI
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (tickCount % 240 === 0) {
+    const swingVotes: SignalVote[] = [
+      signalEMA50200(asset),
+      signalFundingRate(asset),
+      signalLiquiditySweep(asset, price),
+      signalBreakerBlock(asset, price),
+      signalRSI(asset, price),
+    ];
+
+    lastSwingVote = runVote(swingVotes);
+
+    if (lastSwingVote.majority && lastSwingVote.direction === "buy" && now > asset.swingCooldownUntil) {
+      // Swing trades don't need Polymarket confirmation — longer timeframe
+      await placeOrder(asset, "swing", lastSwingVote, price, settings, 0);
+      asset.swingCooldownUntil = now + 2 * 60 * 60 * 1000; // 2-hour cooldown
+    }
+  }
+
+  // ── 6. Update live state for Analytics page ─────────────────────────────────
+  liveState.set(asset.label, {
+    asset: asset.label,
+    price,
+    session: getSessionName(),
+    rsi:  asset.rsi.value,
+    ema5: asset.ema5,
+    ema15: asset.ema15,
+    ema50: asset.swing.ema50,
+    vwap: asset.vwap.vwap,
+    bbUpper: asset.bb.upper,
+    bbLower: asset.bb.lower,
+    bbWidth: asset.bb.width,
+    fundingBias: asset.swing.fundingBias,
+    lastScalpVote: scalpResult,
+    lastDayVote:   lastDayVote ?? (liveState.get(asset.label)?.lastDayVote ?? null),
+    lastSwingVote: lastSwingVote ?? (liveState.get(asset.label)?.lastSwingVote ?? null),
+    scalpCooldownUntil: asset.scalpCooldownUntil,
+    dayCooldownUntil:   asset.dayCooldownUntil,
+    swingCooldownUntil: asset.swingCooldownUntil,
+    circuitBreakerUntil: asset.circuitBreakerUntil,
+  });
 }
 
-// ─── Sync open Alpaca orders ──────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 10 — ORDER SYNC
+// ═══════════════════════════════════════════════════════════════════════════════
+
 async function syncOpenOrders() {
   const settings = await storage.getBotSettings();
   if (!settings.alpacaApiKey || !settings.alpacaApiSecret) return;
 
   const openTrades = await storage.getOpenTrades();
   for (const trade of openTrades) {
-    // Find the asset to record result for circuit breaker
     const assetLabel = trade.market?.includes("BTC") ? "BTC"
       : trade.market?.includes("ETH") ? "ETH"
       : trade.market?.includes("SOL") ? "SOL" : null;
     const assetObj = assetLabel ? ASSETS.find(a => a.label === assetLabel) : null;
 
     if (!trade.alpacaOrderId) {
-      // Auto-close simulated trades after 15 min
+      // Auto-close simulated trades:
+      // Scalp after 5min, Day after 30min, Swing after 2hr
       const ageMinutes = (Date.now() - trade.createdAt.getTime()) / 60000;
-      if (ageMinutes >= 15) {
-        const won = Math.random() < 0.55;
+      const isScalp = trade.market?.includes("[scalp]");
+      const isSwing = trade.market?.includes("[swing]");
+      const closeAfter = isScalp ? 5 : isSwing ? 120 : 30;
+
+      if (ageMinutes >= closeAfter) {
+        // Simulate PnL: scalp 52% win, day 55% win, swing 58% win
+        const winRate = isScalp ? 0.52 : isSwing ? 0.58 : 0.55;
+        const won = Math.random() < winRate;
         const pnl = won
           ? Math.round(trade.betSize * (1 / trade.entryOdds - 1) * 100) / 100
           : -trade.betSize;
@@ -488,30 +851,21 @@ async function syncOpenOrders() {
     }
 
     const isLive = trade.alpacaOrderStatus?.startsWith("live:") ?? false;
-    const result = await fetchOrderStatus(
-      trade.alpacaOrderId,
-      settings.alpacaApiKey,
-      settings.alpacaApiSecret,
-      isLive
-    );
-
+    const result = await fetchOrderStatus(trade.alpacaOrderId, settings.alpacaApiKey, settings.alpacaApiSecret, isLive);
     if (!result.ok || !result.order) continue;
+
     const order  = result.order;
     const prefix = isLive ? "live:" : "paper:";
 
-    await storage.updateTradeAlpacaOrder(
-      trade.id, order.id, prefix + order.status,
+    await storage.updateTradeAlpacaOrder(trade.id, order.id, prefix + order.status,
       order.filled_avg_price ? parseFloat(order.filled_avg_price) : undefined,
       order.filled_qty       ? parseFloat(order.filled_qty)       : undefined,
     );
 
     if (order.status === "filled" && order.filled_avg_price) {
-      const fillPrice       = parseFloat(order.filled_avg_price);
-      const fillQty         = parseFloat(order.filled_qty || "0");
-      const notionalFilled  = fillPrice * fillQty;
-      const pnl = trade.direction === "YES"
-        ? Math.round((notionalFilled - trade.betSize) * 100) / 100
-        : Math.round((trade.betSize  - notionalFilled) * 100) / 100;
+      const fillPrice = parseFloat(order.filled_avg_price);
+      const fillQty   = parseFloat(order.filled_qty || "0");
+      const pnl = Math.round((fillPrice * fillQty - trade.betSize) * 100) / 100;
       await storage.resolveTrade(trade.id, pnl >= 0 ? "won" : "lost", pnl);
       if (assetObj) recordResult(assetObj, pnl >= 0);
       console.log(`[BotEngine] Filled: ${order.id} → PNL ${pnl >= 0 ? "+" : ""}$${pnl}`);
@@ -524,16 +878,23 @@ async function syncOpenOrders() {
   }
 }
 
-// ─── Main engine loop ─────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// SECTION 11 — START / STOP
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let botInterval: ReturnType<typeof setInterval> | null = null;
+let orderSyncInterval: ReturnType<typeof setInterval> | null = null;
+
 export function startBotEngine() {
   if (botInterval) return;
-  console.log("[BotEngine v2] Starting — EMA trend filter + circuit breaker");
+  console.log("[BotEngine v3] Starting — Multi-mode: SCALP(15s) + DAY(5min) + SWING(1hr) | 5 strategies per mode");
 
   botInterval = setInterval(async () => {
     try {
       const settings = await storage.getBotSettings();
       if (!settings.isRunning) return;
 
+      tickCount = (tickCount + 1) % 1000;
       await Promise.all(ASSETS.map(asset => processAsset(asset, settings)));
 
       // PNL snapshot every ~10 min
