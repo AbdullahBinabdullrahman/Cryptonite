@@ -19,7 +19,9 @@ import { insertCopiedWalletSchema } from "@shared/schema";
 // Start engines on server boot
 startBotEngine();
 startCopyEngine();
-startClobStrategy();
+// CLOB disabled — all orders were simulated (no funded Polymarket wallet)
+// Re-enable via POST /api/clob/start if a real Polymarket wallet is funded
+// startClobStrategy();
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
 
