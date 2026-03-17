@@ -649,6 +649,103 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
+  // ── Analytics endpoint ────────────────────────────────────────────────────────
+  app.get("/api/analytics", async (_req, res) => {
+    try {
+      const allTrades = await storage.getTrades(500);
+      const settings  = await storage.getBotSettings();
+      const snapshots = await storage.getPnlSnapshots(30);
+
+      // Per-asset breakdown
+      const assetMap: Record<string, { wins: number; losses: number; pnl: number; trades: number }> = {};
+      for (const t of allTrades) {
+        const asset = t.market?.includes("BTC") || t.market?.includes("bitcoin") ? "BTC"
+          : t.market?.includes("ETH") || t.market?.includes("ethereum") ? "ETH"
+          : t.market?.includes("SOL") || t.market?.includes("solana") ? "SOL" : "OTHER";
+        if (!assetMap[asset]) assetMap[asset] = { wins: 0, losses: 0, pnl: 0, trades: 0 };
+        assetMap[asset].trades++;
+        assetMap[asset].pnl += t.pnl || 0;
+        if (t.status === "won") assetMap[asset].wins++;
+        if (t.status === "lost") assetMap[asset].losses++;
+      }
+
+      // Hourly heatmap (24h)
+      const hourMap: Record<number, { trades: number; wins: number; pnl: number }> = {};
+      for (let i = 0; i < 24; i++) hourMap[i] = { trades: 0, wins: 0, pnl: 0 };
+      for (const t of allTrades) {
+        const h = new Date(t.createdAt).getUTCHours();
+        hourMap[h].trades++;
+        hourMap[h].pnl += t.pnl || 0;
+        if (t.status === "won") hourMap[h].wins++;
+      }
+
+      // Signal accuracy (EMA cross confirmed by Polymarket)
+      const confirmed   = allTrades.filter(t => t.alpacaOrderStatus && !t.alpacaOrderStatus.startsWith("clob"));
+      const won         = confirmed.filter(t => t.status === "won");
+      const lost        = confirmed.filter(t => t.status === "lost");
+      const open        = confirmed.filter(t => t.status === "open");
+      const totalPnl    = confirmed.reduce((s, t) => s + (t.pnl || 0), 0);
+      const avgBet      = confirmed.length ? confirmed.reduce((s, t) => s + (t.betSize || 0), 0) / confirmed.length : 0;
+      const avgEdge     = confirmed.length ? confirmed.reduce((s, t) => s + (t.edgeDetected || 0), 0) / confirmed.length : 0;
+
+      // Win streak / loss streak
+      let curStreak = 0, maxWinStreak = 0, maxLossStreak = 0, streakType = "";
+      for (const t of [...confirmed].reverse()) {
+        if (t.status === "won") {
+          if (streakType === "win") { curStreak++; maxWinStreak = Math.max(maxWinStreak, curStreak); }
+          else { streakType = "win"; curStreak = 1; maxWinStreak = Math.max(maxWinStreak, 1); }
+        } else if (t.status === "lost") {
+          if (streakType === "loss") { curStreak++; maxLossStreak = Math.max(maxLossStreak, curStreak); }
+          else { streakType = "loss"; curStreak = 1; maxLossStreak = Math.max(maxLossStreak, 1); }
+        }
+      }
+
+      // Daily PnL series from snapshots
+      const dailySeries = snapshots.map(s => ({
+        date: new Date(s.timestamp).toISOString().slice(0,10),
+        pnl: Math.round((s.balance - settings.startingBalance) * 100) / 100,
+        balance: s.balance,
+        winRate: s.winRate,
+      }));
+
+      res.json({
+        summary: {
+          totalTrades:   confirmed.length,
+          wins:          won.length,
+          losses:        lost.length,
+          open:          open.length,
+          winRate:       confirmed.length ? Math.round(won.length / (won.length + lost.length) * 10000) / 100 : 0,
+          totalPnl:      Math.round(totalPnl * 100) / 100,
+          avgBetSize:    Math.round(avgBet * 100) / 100,
+          avgEdge:       Math.round(avgEdge * 100) / 100,
+          maxWinStreak,
+          maxLossStreak,
+          balance:       settings.totalBalance,
+          startBalance:  settings.startingBalance,
+          allTimeReturn: Math.round((settings.totalBalance - settings.startingBalance) / settings.startingBalance * 10000) / 100,
+        },
+        assets: Object.entries(assetMap).map(([asset, d]) => ({
+          asset,
+          trades:  d.trades,
+          wins:    d.wins,
+          losses:  d.losses,
+          winRate: d.trades ? Math.round(d.wins / Math.max(1, d.wins + d.losses) * 10000) / 100 : 0,
+          pnl:     Math.round(d.pnl * 100) / 100,
+        })),
+        hourlyHeatmap: Object.entries(hourMap).map(([h, d]) => ({
+          hour:    parseInt(h),
+          trades:  d.trades,
+          wins:    d.wins,
+          winRate: d.trades ? Math.round(d.wins / d.trades * 10000) / 100 : 0,
+          pnl:     Math.round(d.pnl * 100) / 100,
+        })),
+        dailySeries,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Self-ping to prevent Render free tier from sleeping ─────────────────────
   // Pings itself every 14 minutes so the service never idles out
   if (process.env.NODE_ENV === "production" && process.env.RENDER_EXTERNAL_URL) {

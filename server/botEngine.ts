@@ -21,6 +21,64 @@ import { storage } from "./storage";
 import { placeAlpacaOrder, fetchOrderStatus } from "./alpacaOrders";
 import { crowdConfirms } from "./polymarketSignal";
 
+// ─── Time-of-day boost ────────────────────────────────────────────────────────
+// US market hours (13:00–21:00 UTC) = highest volume/volatility → boost by 1.3×
+// EU market hours (07:00–16:00 UTC) = moderate boost 1.15×
+// Otherwise (Asian/quiet hours)     = no boost (1.0×)
+function getTimeOfDayMultiplier(): number {
+  const utcHour = new Date().getUTCHours();
+  if (utcHour >= 13 && utcHour < 21) return 1.30; // US session
+  if (utcHour >= 7  && utcHour < 16) return 1.15; // EU session
+  return 1.0; // quiet hours — trade conservatively
+}
+
+// ─── RSI(14) per-asset tracker ───────────────────────────────────────────────
+interface RsiState {
+  gains: number[];
+  losses: number[];
+  avgGain: number | null;
+  avgLoss: number | null;
+  lastPrice: number | null;
+  rsi: number | null; // current RSI value
+}
+
+function makeRsi(): RsiState {
+  return { gains: [], losses: [], avgGain: null, avgLoss: null, lastPrice: null, rsi: null };
+}
+
+/**
+ * Wilder RSI(14) update — call once per tick with the new price.
+ * Returns RSI 0–100. Returns null until 15 ticks are accumulated.
+ */
+function updateRsi(state: RsiState, price: number): number | null {
+  const PERIOD = 14;
+  if (state.lastPrice === null) { state.lastPrice = price; return null; }
+
+  const change = price - state.lastPrice;
+  state.lastPrice = price;
+  const gain = change > 0 ? change : 0;
+  const loss = change < 0 ? Math.abs(change) : 0;
+
+  if (state.avgGain === null) {
+    // Accumulate initial window
+    state.gains.push(gain);
+    state.losses.push(loss);
+    if (state.gains.length < PERIOD) return null;
+    // First average
+    state.avgGain = state.gains.reduce((a, b) => a + b, 0) / PERIOD;
+    state.avgLoss = state.losses.reduce((a, b) => a + b, 0) / PERIOD;
+  } else {
+    // Wilder smoothing
+    state.avgGain = (state.avgGain * (PERIOD - 1) + gain) / PERIOD;
+    state.avgLoss = (state.avgLoss! * (PERIOD - 1) + loss) / PERIOD;
+  }
+
+  if (state.avgLoss === 0) { state.rsi = 100; return 100; }
+  const rs = state.avgGain! / state.avgLoss!;
+  state.rsi = Math.round((100 - 100 / (1 + rs)) * 100) / 100;
+  return state.rsi;
+}
+
 // ─── Asset definitions ────────────────────────────────────────────────────────
 interface Asset {
   symbol: string;         // Alpaca symbol e.g. "BTCUSD"
@@ -38,6 +96,8 @@ interface Asset {
   // Win-rate circuit breaker: track last 20 local decisions
   recentResults: boolean[]; // true = win, false = loss (resolved trades)
   circuitBreakerUntil: number; // epoch ms — pause until this time
+  // RSI state
+  rsiState: RsiState;
 }
 
 const ASSETS: Asset[] = [
@@ -54,6 +114,7 @@ const ASSETS: Asset[] = [
     ema5: null, ema15: null, prevEma5: null, prevEma15: null,
     prevPrice: null, prevPrevPrice: null,
     recentResults: [], circuitBreakerUntil: 0,
+    rsiState: makeRsi(),
   },
   {
     symbol: "ETHUSD",
@@ -68,6 +129,7 @@ const ASSETS: Asset[] = [
     ema5: null, ema15: null, prevEma5: null, prevEma15: null,
     prevPrice: null, prevPrevPrice: null,
     recentResults: [], circuitBreakerUntil: 0,
+    rsiState: makeRsi(),
   },
   {
     symbol: "SOLUSD",
@@ -82,6 +144,7 @@ const ASSETS: Asset[] = [
     ema5: null, ema15: null, prevEma5: null, prevEma15: null,
     prevPrice: null, prevPrevPrice: null,
     recentResults: [], circuitBreakerUntil: 0,
+    rsiState: makeRsi(),
   },
 ];
 
@@ -258,6 +321,9 @@ async function processAsset(asset: Asset, settings: any) {
       : (asset.symbol === "BTCUSD" ? 83000 : asset.symbol === "ETHUSD" ? 2000 : 130);
   }
 
+  // Update RSI state
+  const rsiValue = updateRsi(asset.rsiState, price);
+
   // Detect signal using EMA cross
   const signal = detectSignal(asset, price);
 
@@ -278,6 +344,21 @@ async function processAsset(asset: Asset, settings: any) {
 
   // No signal → don't trade
   if (!signal) return;
+
+  // ── RSI filter: block overbought/oversold extremes ──────────────────────────
+  // RSI > 78 = dangerously overbought → skip BUY to avoid buying the top
+  // RSI < 22 = deeply oversold  → skip BUY (price may keep falling)
+  // Allow trade if RSI not yet available (warming up)
+  if (rsiValue !== null) {
+    if (signal.direction === "buy" && rsiValue > 78) {
+      console.log(`[BotEngine] ${asset.label} RSI ${rsiValue} > 78 (overbought) — skipping BUY`);
+      return;
+    }
+    if (signal.direction === "buy" && rsiValue < 22) {
+      console.log(`[BotEngine] ${asset.label} RSI ${rsiValue} < 22 (deeply oversold, falling knife) — skipping BUY`);
+      return;
+    }
+  }
 
   // Check daily limits
   const todayCount   = await storage.getTodayTradeCount();
@@ -313,14 +394,16 @@ async function processAsset(asset: Asset, settings: any) {
   console.log(`[BotEngine] ${asset.label} crowd check PASSED: ${reason}`);
   // ──────────────────────────────────────────────────────────────────────────
 
-  // Kelly bet sizing — boost when Polymarket crowd is highly confident
-  // confidenceBoost: 0 = crowd neutral, 1 = crowd very confident
-  // Extra scaling: +50% bet size when crowd confidence > 0.3
+  // ── Bet sizing: Kelly + crowd confidence + time-of-day boost ─────────────────
   const impliedOdds = 0.5 + signal.edgePct / 200;
   const b = (1 - impliedOdds) / impliedOdds;
   const rawKelly = settings.totalBalance * Math.max(0, (b * impliedOdds - (1 - impliedOdds)) / b);
-  const crowdMultiplier = 1 + (confidenceBoost > 0.3 ? confidenceBoost * 0.5 : 0);
-  const betSize = Math.round(Math.min(100, Math.max(10, rawKelly * crowdMultiplier)) * 100) / 100;
+  const crowdMultiplier  = 1 + (confidenceBoost > 0.3 ? confidenceBoost * 0.5 : 0);
+  const sessionMultiplier = getTimeOfDayMultiplier();
+  // RSI sweet-spot bonus: RSI 45–60 = ideal momentum zone → +10% bet
+  const rsiBonus = (rsiValue !== null && rsiValue >= 45 && rsiValue <= 60) ? 1.10 : 1.0;
+  const betSize = Math.round(Math.min(100, Math.max(10, rawKelly * crowdMultiplier * sessionMultiplier * rsiBonus)) * 100) / 100;
+  console.log(`[BotEngine] ${asset.label} bet=$${betSize} kelly=${rawKelly.toFixed(2)} crowd=${crowdMultiplier.toFixed(2)}× session=${sessionMultiplier}× rsi=${rsiValue ?? "N/A"} bonus=${rsiBonus}×`);
 
   const market = asset.markets[Math.floor(Math.random() * asset.markets.length)];
 

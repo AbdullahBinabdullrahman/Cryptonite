@@ -17,9 +17,10 @@ import { useState } from "react";
 import Portfolio from "@/pages/Portfolio";
 import { LiveBotSprite } from "@/components/BotSprite";
 import TerminalChat from "@/pages/TerminalChat";
+import Analytics from "@/pages/Analytics";
 import {
   LayoutDashboard, TrendingUp, List, Settings2, Zap, Copy,
-  Bot, Menu, X, PieChart, Terminal
+  Bot, Menu, X, PieChart, Terminal, BarChart2
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -28,8 +29,9 @@ const NAV_ITEMS = [
   { href: "/markets",   icon: TrendingUp,      label: "Markets",    code: "03" },
   { href: "/trades",    icon: List,            label: "Trades",     code: "04" },
   { href: "/copy",      icon: Copy,            label: "Copy Trade", code: "05" },
-  { href: "/chat",      icon: Terminal,        label: "AI Agent",   code: "06" },
-  { href: "/settings",  icon: Settings2,       label: "Config",     code: "07" },
+  { href: "/chat",       icon: Terminal,  label: "AI Agent",   code: "06" },
+  { href: "/analytics",  icon: BarChart2,  label: "Analytics",  code: "07" },
+  { href: "/settings",   icon: Settings2, label: "Config",     code: "08" },
 ];
 
 // ── Bot status display ────────────────────────────────────────────────────────
@@ -303,8 +305,9 @@ function AppShell() {
               <Route path="/markets"   component={Markets}    />
               <Route path="/trades"    component={Trades}     />
               <Route path="/copy"      component={CopyTrade}    />
-              <Route path="/chat"      component={TerminalChat} />
-              <Route path="/settings"  component={Settings}     />
+              <Route path="/chat"       component={TerminalChat} />
+              <Route path="/analytics"  component={Analytics}    />
+              <Route path="/settings"   component={Settings}     />
               <Route component={NotFound} />
             </Switch>
           </main>

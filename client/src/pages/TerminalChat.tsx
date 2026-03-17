@@ -1,5 +1,6 @@
 /**
  * TerminalChat.tsx — Retro CRT terminal chat powered by Grok + web search
+ * Enhanced: bigger text, better readability, markdown rendering, improved contrast
  */
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
@@ -19,17 +20,21 @@ interface ChatLine {
 }
 
 // ── Colour map ─────────────────────────────────────────────────────────────────
-const COLORS = {
+const C = {
   green:   "hsl(120 100% 55%)",
-  green2:  "hsl(120 100% 40%)",
+  green2:  "hsl(120 100% 45%)",
   green3:  "hsl(120 60% 30%)",
-  amber:   "hsl(45 100% 55%)",
-  cyan:    "hsl(175 90% 55%)",
-  red:     "hsl(0 90% 60%)",
-  dim:     "hsl(120 30% 30%)",
-  dimmer:  "hsl(120 20% 20%)",
+  amber:   "hsl(45 100% 60%)",
+  cyan:    "hsl(175 90% 60%)",
+  red:     "hsl(0 90% 65%)",
+  dim:     "hsl(120 40% 45%)",
+  dimmer:  "hsl(120 20% 25%)",
   bg:      "hsl(220 20% 3%)",
   bg2:     "hsl(220 20% 5%)",
+  bg3:     "hsl(220 20% 7%)",
+  border:  "hsl(120 30% 14%)",
+  purple:  "hsl(270 80% 70%)",
+  gold:    "hsl(45 100% 50%)",
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -40,111 +45,259 @@ function formatTime(d: Date) {
 }
 
 const BOOT_LINES = [
-  { text: "POLYBOT-AI TERMINAL v2.0", color: COLORS.green, delay: 0 },
-  { text: "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", color: COLORS.dimmer, delay: 80 },
-  { text: "NEURAL ENGINE: GROK-3 [xAI]", color: COLORS.cyan, delay: 160 },
-  { text: "WEB SEARCH: ENABLED", color: COLORS.cyan, delay: 240 },
-  { text: "BOT CONTEXT: LIVE", color: COLORS.green, delay: 320 },
-  { text: "SESSION: SECURE", color: COLORS.green, delay: 400 },
-  { text: "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", color: COLORS.dimmer, delay: 480 },
-  { text: "Type your question below. /help for commands.", color: COLORS.amber, delay: 560 },
-  { text: "", color: COLORS.dim, delay: 600 },
+  { text: "╔══════════════════════════════════════════════════════╗", color: C.green3, delay: 0 },
+  { text: "║   POLYBOT-AI TERMINAL  v3.0  ◈  GROK ENGINE          ║", color: C.green,  delay: 70 },
+  { text: "╚══════════════════════════════════════════════════════╝", color: C.green3, delay: 140 },
+  { text: "► NEURAL ENGINE . . . GROK-3 [xAI]  ✓", color: C.cyan,  delay: 220 },
+  { text: "► WEB SEARCH . . . . . ENABLED       ✓", color: C.cyan,  delay: 300 },
+  { text: "► PORTFOLIO CONTEXT . . LIVE         ✓", color: C.green, delay: 380 },
+  { text: "► SESSION AUTH . . . . . SECURE      ✓", color: C.green, delay: 460 },
+  { text: "─────────────────────────────────────────────────────────", color: C.dimmer, delay: 540 },
+  { text: "Type your question or use /help for commands.", color: C.amber, delay: 620 },
+  { text: "", color: C.dim, delay: 680 },
 ];
 
-const HELP_TEXT = `AVAILABLE COMMANDS
-──────────────────────────────────────
-/clear       Clear terminal history
-/status      Show live bot status
-/help        Show this help
+const HELP_TEXT = `┌─────────────────────────────────────────────────────┐
+│  AVAILABLE COMMANDS                                 │
+├─────────────────────────────────────────────────────┤
+│  /clear    — Clear terminal history                 │
+│  /status   — Show live bot status                   │
+│  /help     — Show this help message                 │
+│  ESC       — Abort streaming response               │
+├─────────────────────────────────────────────────────┤
+│  EXAMPLE QUERIES                                    │
+├─────────────────────────────────────────────────────┤
+│  > What is the Kelly Criterion for my bet size?     │
+│  > Search for latest BTC market news                │
+│  > Analyze my win rate and suggest improvements     │
+│  > Explain order book imbalance trading             │
+│  > What Polymarket markets should I watch?          │
+│  > Review my portfolio and suggest rebalancing      │
+└─────────────────────────────────────────────────────┘`;
 
-EXAMPLE QUERIES
-──────────────────────────────────────
-> What is the Kelly Criterion and should I adjust my bet size?
-> Search for latest BTC market news
-> Analyze my win rate and suggest improvements
-> Explain order book imbalance trading
-> What Polymarket markets should I be watching?
-> How does Bayesian updating apply to my CLOB strategy?`;
+// ── Markdown-lite renderer ─────────────────────────────────────────────────────
+// Parses **bold**, `code`, # headers, - lists, numbered lists, > quotes
+function renderMarkdown(text: string, textColor: string): React.ReactNode[] {
+  const lines = text.split("\n");
+  return lines.map((line, i) => {
+    const key = i;
+
+    // Horizontal rule
+    if (/^[-─═]{3,}$/.test(line.trim())) {
+      return <div key={key} style={{ color: C.dimmer, marginBottom: 4 }}>{line}</div>;
+    }
+
+    // H1 header
+    if (line.startsWith("# ")) {
+      return (
+        <div key={key} style={{ color: C.cyan, fontWeight: "bold", fontSize: "1.05em", marginTop: 12, marginBottom: 4, letterSpacing: "0.06em", textShadow: `0 0 10px ${C.cyan}60` }}>
+          ◈ {line.slice(2)}
+        </div>
+      );
+    }
+
+    // H2 header
+    if (line.startsWith("## ")) {
+      return (
+        <div key={key} style={{ color: C.amber, fontWeight: "bold", fontSize: "0.98em", marginTop: 10, marginBottom: 3, letterSpacing: "0.04em" }}>
+          ▸ {line.slice(3)}
+        </div>
+      );
+    }
+
+    // H3 header
+    if (line.startsWith("### ")) {
+      return (
+        <div key={key} style={{ color: C.green2, fontSize: "0.94em", marginTop: 8, marginBottom: 2 }}>
+          › {line.slice(4)}
+        </div>
+      );
+    }
+
+    // Blockquote
+    if (line.startsWith("> ")) {
+      return (
+        <div key={key} style={{ borderLeft: `3px solid ${C.cyan}60`, paddingLeft: 10, color: C.dim, fontStyle: "italic", marginBottom: 2 }}>
+          {inlineMarkdown(line.slice(2), C.dim)}
+        </div>
+      );
+    }
+
+    // Unordered list
+    if (/^[-*•] /.test(line)) {
+      return (
+        <div key={key} style={{ display: "flex", gap: 8, marginBottom: 2 }}>
+          <span style={{ color: C.amber, flexShrink: 0 }}>▸</span>
+          <span>{inlineMarkdown(line.slice(2), textColor)}</span>
+        </div>
+      );
+    }
+
+    // Ordered list
+    const olMatch = line.match(/^(\d+)\. (.*)/);
+    if (olMatch) {
+      return (
+        <div key={key} style={{ display: "flex", gap: 8, marginBottom: 2 }}>
+          <span style={{ color: C.amber, flexShrink: 0, minWidth: 20 }}>{olMatch[1]}.</span>
+          <span>{inlineMarkdown(olMatch[2], textColor)}</span>
+        </div>
+      );
+    }
+
+    // Empty line → spacer
+    if (!line.trim()) {
+      return <div key={key} style={{ height: 6 }} />;
+    }
+
+    // Normal line
+    return (
+      <div key={key} style={{ marginBottom: 2 }}>
+        {inlineMarkdown(line, textColor)}
+      </div>
+    );
+  });
+}
+
+function inlineMarkdown(text: string, defaultColor: string): React.ReactNode {
+  // Handle **bold**, `code`, *italic*
+  const parts: React.ReactNode[] = [];
+  let remaining = text;
+  let idx = 0;
+
+  const patterns = [
+    { re: /\*\*(.+?)\*\*/, render: (m: string) => <strong key={idx++} style={{ color: C.amber, fontWeight: "bold" }}>{m}</strong> },
+    { re: /`([^`]+)`/, render: (m: string) => <code key={idx++} style={{ background: C.bg3, color: C.cyan, padding: "1px 5px", fontFamily: "var(--font-mono)", fontSize: "0.92em", border: `1px solid ${C.border}` }}>{m}</code> },
+    { re: /\*(.+?)\*/, render: (m: string) => <em key={idx++} style={{ color: C.purple, fontStyle: "italic" }}>{m}</em> },
+  ];
+
+  while (remaining.length > 0) {
+    let earliest: { index: number; full: string; content: string; render: (m: string) => React.ReactNode } | null = null;
+
+    for (const pat of patterns) {
+      const match = remaining.match(pat.re);
+      if (match && match.index !== undefined) {
+        if (!earliest || match.index < earliest.index) {
+          earliest = { index: match.index, full: match[0], content: match[1], render: pat.render };
+        }
+      }
+    }
+
+    if (!earliest) {
+      parts.push(<span key={idx++}>{remaining}</span>);
+      break;
+    }
+
+    if (earliest.index > 0) {
+      parts.push(<span key={idx++}>{remaining.slice(0, earliest.index)}</span>);
+    }
+    parts.push(earliest.render(earliest.content));
+    remaining = remaining.slice(earliest.index + earliest.full.length);
+  }
+
+  return <>{parts}</>;
+}
 
 // ── Line renderer ──────────────────────────────────────────────────────────────
 function TerminalLine({ line }: { line: ChatLine }) {
   const prefix = {
-    user:      { symbol: "❯", color: COLORS.amber },
-    assistant: { symbol: "◈", color: COLORS.green },
-    system:    { symbol: "◆", color: COLORS.cyan },
-    web:       { symbol: "⊕", color: COLORS.cyan },
+    user:      { symbol: "❯", color: C.amber  },
+    assistant: { symbol: "◈", color: C.green  },
+    system:    { symbol: "◆", color: C.cyan   },
+    web:       { symbol: "⊕", color: C.cyan   },
   }[line.role];
 
   const textColor = {
-    user:      COLORS.amber,
-    assistant: COLORS.green,
-    system:    COLORS.cyan,
-    web:       COLORS.cyan,
+    user:      C.amber,
+    assistant: C.green,
+    system:    C.cyan,
+    web:       C.cyan,
   }[line.role];
 
+  const isAssistant = line.role === "assistant";
+  const isSystem    = line.role === "system";
+
   return (
-    <div style={{ marginBottom: "0.75rem", lineHeight: 1.7 }}>
-      {/* Prefix row */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: "0.5rem" }}>
+    <div style={{
+      marginBottom: "1rem",
+      background: isAssistant ? `${C.green}06` : "transparent",
+      border: isAssistant ? `1px solid ${C.border}` : "1px solid transparent",
+      borderRadius: 2,
+      padding: isAssistant ? "8px 12px 8px 12px" : "0",
+    }}>
+      {/* Header row */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: 6 }}>
         <span style={{
           fontFamily: "var(--font-mono)",
-          fontSize: "0.7rem",
+          fontSize: "0.95rem",
           color: prefix.color,
           flexShrink: 0,
-          marginTop: "0.05rem",
-          textShadow: `0 0 6px ${prefix.color}`,
+          textShadow: `0 0 8px ${prefix.color}`,
         }}>
           {prefix.symbol}
         </span>
         <span style={{
           fontFamily: "var(--font-pixel)",
-          fontSize: "0.42rem",
-          color: COLORS.dim,
+          fontSize: "0.6rem",
+          color: prefix.color,
           flexShrink: 0,
-          marginTop: "0.1rem",
-          letterSpacing: "0.05em",
+          letterSpacing: "0.08em",
+          textShadow: `0 0 6px ${prefix.color}60`,
+          background: `${prefix.color}18`,
+          padding: "1px 6px",
+          border: `1px solid ${prefix.color}30`,
         }}>
-          [{line.role.toUpperCase()}]
+          {line.role.toUpperCase()}
         </span>
         <span style={{
           fontFamily: "var(--font-mono)",
-          fontSize: "0.45rem",
-          color: COLORS.dimmer,
+          fontSize: "0.65rem",
+          color: C.dimmer,
           flexShrink: 0,
-          marginTop: "0.12rem",
         }}>
           {formatTime(line.timestamp)}
         </span>
+        {line.streaming && (
+          <span style={{ fontSize: "0.6rem", color: C.dim, animation: "pulse 1s infinite" }}>
+            ● STREAMING
+          </span>
+        )}
       </div>
 
       {/* Content */}
       <div style={{
         fontFamily: "var(--font-mono)",
-        fontSize: "0.72rem",
+        fontSize: "0.88rem",
         color: textColor,
-        paddingLeft: "1.5rem",
-        whiteSpace: "pre-wrap",
+        paddingLeft: isSystem ? 0 : "1.2rem",
+        lineHeight: 1.85,
         wordBreak: "break-word",
-        lineHeight: 1.8,
-        textShadow: `0 0 8px ${textColor}40`,
+        textShadow: `0 0 10px ${textColor}30`,
+        whiteSpace: isSystem ? "pre-wrap" : undefined,
       }}>
-        {line.content}
+        {(isAssistant || isSystem) && !line.streaming
+          ? renderMarkdown(line.content, textColor)
+          : <span>{line.content}</span>
+        }
         {line.streaming && (
-          <span className="blink" style={{ color: COLORS.green, marginLeft: 2 }}>█</span>
+          <span className="blink" style={{ color: C.green, marginLeft: 2 }}>█</span>
         )}
       </div>
 
       {/* Citations */}
       {line.citations && line.citations.length > 0 && (
-        <div style={{ paddingLeft: "1.5rem", marginTop: "0.3rem" }}>
+        <div style={{ paddingLeft: "1.2rem", marginTop: 8, borderTop: `1px solid ${C.border}`, paddingTop: 6 }}>
+          <div style={{ fontFamily: "var(--font-pixel)", fontSize: "0.55rem", color: C.dim, letterSpacing: "0.08em", marginBottom: 4 }}>
+            ◈ WEB SOURCES
+          </div>
           {line.citations.map((c, i) => (
             <div key={i} style={{
               fontFamily: "var(--font-mono)",
-              fontSize: "0.6rem",
-              color: COLORS.cyan,
-              opacity: 0.7,
+              fontSize: "0.72rem",
+              color: C.cyan,
+              opacity: 0.8,
+              marginBottom: 2,
             }}>
-              [WEB-{i+1}] {c}
+              <span style={{ color: C.dimmer }}>[{i+1}]</span> {c}
             </div>
           ))}
         </div>
@@ -155,13 +308,14 @@ function TerminalLine({ line }: { line: ChatLine }) {
 
 // ── Boot sequence line ─────────────────────────────────────────────────────────
 function BootLine({ text, color }: { text: string; color: string }) {
+  const isBox = text.startsWith("╔") || text.startsWith("╚") || text.startsWith("║");
   return (
     <div style={{
-      fontFamily: text.includes("━") ? "var(--font-mono)" : "var(--font-pixel)",
-      fontSize: text.includes("━") ? "0.7rem" : "0.55rem",
+      fontFamily: "var(--font-mono)",
+      fontSize: isBox ? "0.78rem" : "0.75rem",
       color,
-      letterSpacing: text.includes("━") ? 0 : "0.08em",
-      lineHeight: 1.8,
+      letterSpacing: isBox ? 0 : "0.04em",
+      lineHeight: 1.9,
       textShadow: `0 0 8px ${color}50`,
     }}>
       {text || "\u00A0"}
@@ -194,7 +348,7 @@ export default function TerminalChat() {
       if (!line) return;
       setBootLines(prev => [...prev, line]);
       i++;
-      setTimeout(show, 80);
+      setTimeout(show, 70);
     };
     const t = setTimeout(show, 100);
     return () => { cancelled = true; clearTimeout(t); };
@@ -223,20 +377,24 @@ export default function TerminalChat() {
   const handleClear = useCallback(() => {
     setLines([]);
     setBootLines([]);
-    // Also clear server history
     apiRequest("DELETE", "/api/chat/history").catch(() => {});
     addLine("system", "TERMINAL CLEARED. SESSION HISTORY RESET.");
   }, [addLine]);
 
   const handleStatus = useCallback(() => {
     const d: any = dashData || {};
+    const running = d.isRunning ? "● ACTIVE" : "○ STANDBY";
+    const pnlStr  = (d.todayPnl || 0) >= 0 ? `+$${(d.todayPnl || 0).toFixed(2)}` : `-$${Math.abs(d.todayPnl || 0).toFixed(2)}`;
+    const wr      = d.winRate?.rate ? (d.winRate.rate * 100).toFixed(1) : "N/A";
     const statusText = [
-      `BOT STATUS: ${d.isRunning ? "● ACTIVE" : "○ STANDBY"}`,
-      `BALANCE   : $${d.totalBalance?.toFixed(2) || "N/A"}`,
-      `TODAY PNL : ${(d.todayPnl || 0) >= 0 ? "+" : ""}$${(d.todayPnl || 0).toFixed(2)}`,
-      `WIN RATE  : ${d.winRate?.rate ? (d.winRate.rate * 100).toFixed(1) : "N/A"}% (${d.winRate?.wins || 0}/${d.winRate?.total || 0})`,
-      `TRADES    : ${d.todayCount || 0} today`,
-      `BTC PRICE : $${d.btcPrice?.price?.toLocaleString() || "N/A"}`,
+      "┌──────────────────────────────────┐",
+      `│  BOT STATUS  : ${running.padEnd(16)}│`,
+      `│  BALANCE     : $${(d.totalBalance?.toFixed(2) || "N/A").padEnd(15)}│`,
+      `│  TODAY PNL   : ${pnlStr.padEnd(16)}│`,
+      `│  WIN RATE    : ${(wr + "%").padEnd(16)}│`,
+      `│  TRADES TODAY: ${String(d.todayCount || 0).padEnd(16)}│`,
+      `│  BTC PRICE   : $${(d.btcPrice?.price?.toLocaleString() || "N/A").padEnd(14)}│`,
+      "└──────────────────────────────────┘",
     ].join("\n");
     addLine("system", statusText);
   }, [dashData, addLine]);
@@ -245,25 +403,20 @@ export default function TerminalChat() {
     const trimmed = text.trim();
     if (!trimmed || isStreaming) return;
 
-    // Save to command history
     setCmdHistory(prev => [trimmed, ...prev.slice(0, 49)]);
     setCmdIndex(-1);
     setInput("");
 
-    // Handle slash commands
     if (trimmed === "/clear") { handleClear(); return; }
     if (trimmed === "/status") { addLine("user", "/status"); handleStatus(); return; }
-    if (trimmed === "/help") { addLine("user", "/help"); addLine("system", HELP_TEXT); return; }
+    if (trimmed === "/help")   { addLine("user", "/help");   addLine("system", HELP_TEXT); return; }
 
-    // Show user message
     addLine("user", trimmed);
 
-    // Streaming assistant response
     setIsStreaming(true);
     const assistantId = addLine("assistant", "", { streaming: true });
 
     try {
-      // Use fetch directly for SSE streaming (apiRequest doesn't support it)
       const RENDER_URL = "https://cryptonite-wt0e.onrender.com";
       const API_BASE = typeof window !== "undefined" && window.location.hostname !== "localhost"
         ? RENDER_URL : "";
@@ -280,7 +433,7 @@ export default function TerminalChat() {
 
       if (!res.ok) {
         const err = await res.text();
-        updateLine(assistantId, { content: `ERROR: ${err}`, streaming: false });
+        updateLine(assistantId, { content: `ERROR ${res.status}: ${err}`, streaming: false });
         setIsStreaming(false);
         return;
       }
@@ -336,13 +489,12 @@ export default function TerminalChat() {
         }
       }
 
-      // Ensure streaming flag cleared
       updateLine(assistantId, { streaming: false });
       setIsStreaming(false);
 
     } catch (err: any) {
       if (err.name === "AbortError") {
-        updateLine(assistantId, { content: "[ABORTED]", streaming: false });
+        updateLine(assistantId, { content: "[RESPONSE ABORTED BY USER]", streaming: false });
       } else {
         updateLine(assistantId, { content: `CONNECTION ERROR: ${err.message}`, streaming: false });
       }
@@ -368,13 +520,21 @@ export default function TerminalChat() {
     }
   };
 
+  const SUGGESTIONS = [
+    "Analyze my win rate",
+    "Latest BTC news",
+    "Optimize my bet size",
+    "Review my portfolio",
+    "Show trading signals",
+  ];
+
   return (
     <div
       style={{
         height: "calc(100vh - 2.5rem)",
         display: "flex",
         flexDirection: "column",
-        background: COLORS.bg,
+        background: C.bg,
         fontFamily: "var(--font-mono)",
         position: "relative",
         overflow: "hidden",
@@ -384,14 +544,14 @@ export default function TerminalChat() {
       {/* Scanline overlay */}
       <div style={{
         position: "absolute", inset: 0, pointerEvents: "none", zIndex: 10,
-        backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px)",
+        backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.08) 3px, rgba(0,0,0,0.08) 4px)",
       }} />
 
       {/* Header bar */}
       <div style={{
-        background: COLORS.bg2,
-        borderBottom: `1px solid ${COLORS.dimmer}`,
-        padding: "0.5rem 1rem",
+        background: C.bg2,
+        borderBottom: `1px solid ${C.border}`,
+        padding: "0.55rem 1.25rem",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -399,21 +559,40 @@ export default function TerminalChat() {
         zIndex: 5,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <span style={{ fontFamily: "var(--font-pixel)", fontSize: "0.55rem", color: COLORS.green, letterSpacing: "0.1em", textShadow: `0 0 8px ${COLORS.green}` }}>
+          <span style={{ fontFamily: "var(--font-pixel)", fontSize: "0.65rem", color: C.green, letterSpacing: "0.1em", textShadow: `0 0 10px ${C.green}` }}>
             ◈ POLYBOT-AI TERMINAL
           </span>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.6rem", color: COLORS.dimmer }}>GROK-3 · WEB-ENABLED</span>
+          <span style={{
+            fontFamily: "var(--font-mono)", fontSize: "0.7rem", color: C.cyan,
+            background: `${C.cyan}18`, padding: "1px 8px", border: `1px solid ${C.cyan}30`,
+          }}>
+            GROK-3 · WEB-ENABLED
+          </span>
         </div>
-        <div style={{ display: "flex", gap: "0.75rem" }}>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
           <button
             onClick={(e) => { e.stopPropagation(); handleStatus(); }}
-            style={{ background: "none", border: `1px solid ${COLORS.dimmer}`, color: COLORS.cyan, fontFamily: "var(--font-pixel)", fontSize: "0.42rem", padding: "0.2rem 0.5rem", cursor: "pointer", letterSpacing: "0.06em" }}
+            style={{
+              background: "none", border: `1px solid ${C.border}`, color: C.cyan,
+              fontFamily: "var(--font-pixel)", fontSize: "0.52rem",
+              padding: "0.25rem 0.65rem", cursor: "pointer", letterSpacing: "0.06em",
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = `${C.cyan}20`; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "none"; }}
           >
             /STATUS
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); handleClear(); }}
-            style={{ background: "none", border: `1px solid ${COLORS.dimmer}`, color: COLORS.dim, fontFamily: "var(--font-pixel)", fontSize: "0.42rem", padding: "0.2rem 0.5rem", cursor: "pointer", letterSpacing: "0.06em" }}
+            style={{
+              background: "none", border: `1px solid ${C.border}`, color: C.dimmer,
+              fontFamily: "var(--font-pixel)", fontSize: "0.52rem",
+              padding: "0.25rem 0.65rem", cursor: "pointer", letterSpacing: "0.06em",
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = C.dim; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = C.dimmer; }}
           >
             /CLEAR
           </button>
@@ -424,14 +603,14 @@ export default function TerminalChat() {
       <div style={{
         flex: 1,
         overflowY: "auto",
-        padding: "1rem 1.25rem 0.5rem",
+        padding: "1.25rem 1.5rem 0.5rem",
         zIndex: 5,
         scrollbarWidth: "thin",
-        scrollbarColor: `${COLORS.dimmer} transparent`,
+        scrollbarColor: `${C.dimmer} transparent`,
       }}>
         {/* Boot lines */}
         {bootLines.filter(Boolean).map((bl, i) => (
-          <BootLine key={i} text={bl?.text ?? ""} color={bl?.color ?? COLORS.dim} />
+          <BootLine key={i} text={bl?.text ?? ""} color={bl?.color ?? C.dim} />
         ))}
 
         {/* Chat lines */}
@@ -439,10 +618,11 @@ export default function TerminalChat() {
           <TerminalLine key={line.id} line={line} />
         ))}
 
-        {/* Streaming indicator */}
+        {/* Streaming indicator (when no lines yet) */}
         {isStreaming && lines.every(l => !l.streaming) && (
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: COLORS.dim }}>
-            <span className="blink">█</span> PROCESSING...
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem", color: C.dim, display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="blink">█</span>
+            <span>GROK IS THINKING...</span>
           </div>
         )}
 
@@ -451,36 +631,39 @@ export default function TerminalChat() {
 
       {/* Input area */}
       <div style={{
-        borderTop: `1px solid ${COLORS.dimmer}`,
-        padding: "0.75rem 1.25rem",
-        background: COLORS.bg2,
+        borderTop: `1px solid ${C.border}`,
+        padding: "0.85rem 1.5rem",
+        background: C.bg2,
         flexShrink: 0,
         zIndex: 5,
       }}>
         {/* Suggestion chips */}
-        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
-          {[
-            "Analyze my win rate",
-            "Latest BTC news",
-            "Optimize my bet size",
-            "Explain CLOB strategy",
-          ].map(s => (
+        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
+          {SUGGESTIONS.map(s => (
             <button
               key={s}
               onClick={(e) => { e.stopPropagation(); setInput(s); inputRef.current?.focus(); }}
               style={{
                 background: "transparent",
-                border: `1px solid ${COLORS.dimmer}`,
+                border: `1px solid ${C.dimmer}`,
                 borderRadius: "2px",
-                color: COLORS.dim,
+                color: C.dim,
                 fontFamily: "var(--font-mono)",
-                fontSize: "0.58rem",
-                padding: "0.15rem 0.5rem",
+                fontSize: "0.7rem",
+                padding: "0.2rem 0.6rem",
                 cursor: "pointer",
-                transition: "all 0.1s",
+                transition: "all 0.15s",
               }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = COLORS.green3; (e.currentTarget as HTMLButtonElement).style.color = COLORS.green2; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = COLORS.dimmer; (e.currentTarget as HTMLButtonElement).style.color = COLORS.dim; }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLButtonElement).style.borderColor = C.green3;
+                (e.currentTarget as HTMLButtonElement).style.color = C.green;
+                (e.currentTarget as HTMLButtonElement).style.background = `${C.green}10`;
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLButtonElement).style.borderColor = C.dimmer;
+                (e.currentTarget as HTMLButtonElement).style.color = C.dim;
+                (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+              }}
             >
               {s}
             </button>
@@ -488,15 +671,25 @@ export default function TerminalChat() {
         </div>
 
         {/* Input row */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: COLORS.amber, flexShrink: 0, textShadow: `0 0 6px ${COLORS.amber}` }}>❯</span>
+        <div style={{
+          display: "flex", alignItems: "center", gap: "0.75rem",
+          background: C.bg3, border: `1px solid ${isStreaming ? C.green3 : C.border}`,
+          padding: "0.5rem 0.75rem",
+          boxShadow: isStreaming ? `0 0 12px ${C.green}20` : "none",
+          transition: "all 0.2s",
+        }}>
+          <span style={{
+            fontFamily: "var(--font-mono)", fontSize: "1rem",
+            color: isStreaming ? C.dim : C.amber, flexShrink: 0,
+            textShadow: isStreaming ? "none" : `0 0 8px ${C.amber}`,
+          }}>❯</span>
           <input
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={isStreaming}
-            placeholder={isStreaming ? "PROCESSING... (ESC to abort)" : "Enter command or question..."}
+            placeholder={isStreaming ? "GENERATING... (ESC to abort)" : "Enter command or question..."}
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -507,34 +700,42 @@ export default function TerminalChat() {
               border: "none",
               outline: "none",
               fontFamily: "var(--font-mono)",
-              fontSize: "0.72rem",
-              color: isStreaming ? COLORS.dim : COLORS.amber,
-              caretColor: COLORS.green,
+              fontSize: "0.88rem",
+              color: isStreaming ? C.dim : C.amber,
+              caretColor: C.green,
               letterSpacing: "0.02em",
             }}
           />
           <button
             onClick={(e) => { e.stopPropagation(); isStreaming ? abortRef.current?.abort() : sendMessage(input); }}
             style={{
-              background: isStreaming ? "transparent" : `${COLORS.green}15`,
-              border: `1px solid ${isStreaming ? COLORS.red : COLORS.green}60`,
+              background: isStreaming ? `${C.red}15` : `${C.green}15`,
+              border: `1px solid ${isStreaming ? C.red : C.green}60`,
               borderRadius: "2px",
-              color: isStreaming ? COLORS.red : COLORS.green,
+              color: isStreaming ? C.red : C.green,
               fontFamily: "var(--font-pixel)",
-              fontSize: "0.42rem",
-              padding: "0.3rem 0.6rem",
+              fontSize: "0.52rem",
+              padding: "0.3rem 0.75rem",
               cursor: "pointer",
-              letterSpacing: "0.08em",
+              letterSpacing: "0.1em",
               flexShrink: 0,
+              transition: "all 0.15s",
             }}
           >
-            {isStreaming ? "ABORT" : "SEND"}
+            {isStreaming ? "■ ABORT" : "► SEND"}
           </button>
         </div>
 
         {/* Hint */}
-        <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.55rem", color: COLORS.dimmer, marginTop: "0.35rem" }}>
-          ↑↓ history · ESC abort · /help · /clear · /status
+        <div style={{
+          fontFamily: "var(--font-mono)", fontSize: "0.63rem",
+          color: C.dimmer, marginTop: "0.4rem",
+          display: "flex", gap: "1rem",
+        }}>
+          <span>↑↓ history</span>
+          <span>ESC abort stream</span>
+          <span>/help /clear /status</span>
+          {isStreaming && <span style={{ color: C.green, animation: "pulse 1s infinite" }}>● streaming</span>}
         </div>
       </div>
     </div>

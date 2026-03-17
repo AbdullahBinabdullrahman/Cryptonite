@@ -147,10 +147,43 @@ export async function getPolySignal(asset: string): Promise<PolySignal | null> {
       if (!m.active || m.closed) return false;
       const end = m.endDate ? new Date(m.endDate).getTime() : 0;
       const remaining = (end - now) / 1000;
-      return remaining > 30 && remaining < 600; // between 30s and 10 min
+      // Widened window: accept markets up to 2 hours away.
+      // 5-min slots may not always be live — fall back to the nearest available.
+      return remaining > 30 && remaining < 7200; // 30s – 2 hours
     });
 
-    if (!relevant.length) return null;
+    if (!relevant.length) {
+      // Last-resort fallback: pick any active, non-closed market for this asset
+      // regardless of time window (might be a daily or weekly market)
+      const fallback = markets.filter(m => {
+        const q = (m.question || "").toLowerCase();
+        if (!q.includes("up or down")) return false;
+        if (!q.includes(assetKeyword)) return false;
+        if (parseFloat(m.liquidity || "0") < 200) return false;
+        if (!m.active || m.closed) return false;
+        const end = m.endDate ? new Date(m.endDate).getTime() : 0;
+        return end > now; // just hasn't expired
+      });
+      if (!fallback.length) return null;
+      // Use nearest-expiry fallback
+      fallback.sort((a, b) =>
+        (a.endDate ? new Date(a.endDate).getTime() : 0) -
+        (b.endDate ? new Date(b.endDate).getTime() : 0)
+      );
+      // Treat as weaker signal — return with 0.5 neutral price (no strong edge)
+      console.log(`[PolySignal] ${asset} no short-term market — using fallback: ${fallback[0].question}`);
+      const fallbackSignal: PolySignal = {
+        asset,
+        yesPrice: 0.5,
+        obImbalance: 0,
+        crowdDirection: "neutral",
+        confidence: 0,
+        marketQuestion: fallback[0].question,
+        timeRemaining: Math.max(0, (new Date(fallback[0].endDate || "").getTime() - now) / 1000),
+      };
+      signalCache.set(asset, { signal: fallbackSignal, ts: Date.now() });
+      return fallbackSignal;
+    }
 
     // Pick the market expiring soonest (most relevant for short-term signal)
     relevant.sort((a, b) => {
