@@ -48,6 +48,7 @@ function initDb() {
       edge_detected REAL NOT NULL,
       status TEXT NOT NULL DEFAULT 'open',
       pnl REAL NOT NULL DEFAULT 0,
+      log_return REAL,
       alpaca_order_id TEXT,
       alpaca_order_status TEXT,
       fill_price REAL,
@@ -125,6 +126,13 @@ function initDb() {
   if (!existing) {
     sqlite.prepare("INSERT INTO bot_settings DEFAULT VALUES").run();
   }
+
+  // ── Safe migrations for existing DBs ──────────────────────────────────────
+  // Add log_return column if missing (added in v4)
+  try {
+    sqlite.exec("ALTER TABLE trades ADD COLUMN log_return REAL");
+    console.log("[DB] Migration: added log_return column to trades");
+  } catch { /* column already exists — safe to ignore */ }
 }
 
 initDb();
@@ -251,9 +259,10 @@ class SqliteStorage implements IStorage {
     // final = betSize + pnl, initial = betSize
     const trade = db.select().from(schema.trades).where(eq(schema.trades.id, id)).get();
     let logReturn: number | null = null;
-    if (trade && trade.bet_size > 0) {
-      const finalValue = trade.bet_size + pnl;
-      logReturn = finalValue > 0 ? Math.round(Math.log(finalValue / trade.bet_size) * 10000) / 10000 : -Infinity;
+    const betSz = (trade as any)?.bet_size ?? (trade as any)?.betSize ?? 0;
+    if (betSz > 0) {
+      const finalValue = betSz + pnl;
+      logReturn = finalValue > 0 ? Math.round(Math.log(finalValue / betSz) * 10000) / 10000 : null;
     }
     db.update(schema.trades)
       .set({ status, pnl, logReturn, resolvedAt: new Date() })
