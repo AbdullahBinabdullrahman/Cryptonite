@@ -166,15 +166,15 @@ function makeVwap(): VwapState {
   return { cumPV: 0, cumV: 0, vwap: null, ticks: 0 };
 }
 
-// We don't have real volume data, so we approximate:
-// Use the tick-to-tick price change magnitude as a volume proxy
+// We don't have real volume data, so we use equal-weight rolling VWAP (simpler, accurate)
 function updateVwap(s: VwapState, price: number, prevPrice: number | null): void {
-  const vol = prevPrice ? Math.abs(price - prevPrice) / prevPrice * 1e6 + 1 : 1;
+  // Use normalized volume proxy: 1 unit per tick (avoids ETH/SOL price-scale distortion)
+  const vol = 1;
   s.cumPV += price * vol;
   s.cumV  += vol;
   s.ticks++;
-  // Reset VWAP every ~4 hours (960 ticks at 15s) to avoid day-stale drift
-  if (s.ticks > 960) { s.cumPV = price * vol; s.cumV = vol; s.ticks = 1; }
+  // Reset VWAP every ~4 hours (960 ticks at 15s) to avoid stale drift
+  if (s.ticks > 960) { s.cumPV = price; s.cumV = 1; s.ticks = 1; }
   s.vwap = s.cumV > 0 ? s.cumPV / s.cumV : price;
 }
 
@@ -412,6 +412,7 @@ function signalBollingerBands(a: Asset, price: number): SignalVote {
 }
 
 function signalVWAP(a: Asset, price: number): SignalVote {
+  // prevPrice is already updated by signalEMACross — read it before EMA mutates it
   updateVwap(a.vwap, price, a.prevPrice);
   const vwap = a.vwap.vwap;
   if (!vwap || a.vwap.ticks < 5) return { name: "VWAP", vote: "neutral", strength: 0 };
@@ -717,11 +718,13 @@ async function processAsset(asset: Asset, settings: any) {
   // MODE A: SCALP — every tick (15s)
   // Signals: EMA cross, RSI, Bollinger Bands, VWAP, Polymarket crowd
   // ─────────────────────────────────────────────────────────────────────────────
+  // Important: VWAP must be called BEFORE EMA cross (EMA cross mutates prevPrice)
+  const vwapVote  = signalVWAP(asset, price);
   const scalpVotes: SignalVote[] = [
     signalEMACross(asset, price),
     signalRSI(asset, price),
     signalBollingerBands(asset, price),
-    signalVWAP(asset, price),
+    vwapVote,
     // 5th vote: Polymarket crowd is evaluated separately after voting
   ];
 
@@ -752,7 +755,7 @@ async function processAsset(asset: Asset, settings: any) {
       signalBreakerBlock(asset, price),
       signalRSI(asset, price),
       signalBollingerBands(asset, price),
-      signalVWAP(asset, price),
+      { ...vwapVote }, // reuse already-computed VWAP vote
     ];
 
     lastDayVote = runVote(dayVotes);
