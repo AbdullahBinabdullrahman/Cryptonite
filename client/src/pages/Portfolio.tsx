@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import {
   TrendingUp, TrendingDown, Wallet, BarChart2,
-  RefreshCw, Activity, DollarSign, Target, Award, AlertCircle,
-  ChevronRight, Clock,
+  RefreshCw, Activity, DollarSign, Target, Award,
+  Clock, Zap, FlaskConical,
 } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
@@ -76,7 +76,8 @@ export default function Portfolio() {
   }
 
   const alpaca  = data?.alpaca  ?? { positions: [], isLive: false, count: 0 };
-  const bot     = data?.bot     ?? { openPositions: [], openCount: 0, totalInvested: 0, resolvedCount: 0, totalRealizedPnl: 0, won: 0, lost: 0, winRate: 0, pnlByDay: [] };
+  const bot     = data?.bot     ?? { openPositions: [], openCount: 0, totalInvested: 0, resolvedCount: 0, totalRealizedPnl: 0, won: 0, lost: 0, winRate: 0, pnlByDay: [], cumulativeLogReturn: 0, compoundReturnPct: 0 };
+  const clob    = data?.clob    ?? { trades: [], count: 0, totalPnl: 0 };
   const account = data?.account ?? { totalBalance: 0, startingBalance: 0, allTimePnl: 0 };
 
   const allTimePnlPos  = account.allTimePnl >= 0;
@@ -113,12 +114,14 @@ export default function Portfolio() {
       </div>
 
       {/* ── Summary stat cards ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, gridTemplateRows: "auto" }}>
         {[
-          { label: "TOTAL BALANCE", value: fmt$(account.totalBalance), sub: `BASE: ${fmt$(account.startingBalance)}`, color: "hsl(175 90% 55%)", Icon: Wallet },
-          { label: "ALL-TIME P&L",  value: fmt$(account.allTimePnl), sub: fmtPct((account.allTimePnl / Math.max(account.startingBalance, 1)) * 100), color: allTimePnlPos ? "hsl(120 100% 55%)" : "hsl(0 90% 55%)", Icon: allTimePnlPos ? TrendingUp : TrendingDown },
-          { label: "REALIZED P&L",  value: fmt$(bot.totalRealizedPnl), sub: `${bot.resolvedCount} RESOLVED`, color: bot.totalRealizedPnl >= 0 ? "hsl(120 100% 55%)" : "hsl(0 90% 55%)", Icon: DollarSign },
-          { label: "WIN RATE",      value: `${bot.winRate}%`, sub: `${bot.won}W / ${bot.lost}L`, color: "hsl(45 100% 55%)", Icon: Award },
+          { label: "TOTAL BALANCE",   value: fmt$(account.totalBalance), sub: `BASE: ${fmt$(account.startingBalance)}`, color: "hsl(175 90% 55%)", Icon: Wallet },
+          { label: "ALL-TIME P&L",    value: fmt$(account.allTimePnl), sub: fmtPct((account.allTimePnl / Math.max(account.startingBalance, 1)) * 100), color: allTimePnlPos ? "hsl(120 100% 55%)" : "hsl(0 90% 55%)", Icon: allTimePnlPos ? TrendingUp : TrendingDown },
+          { label: "REALIZED P&L",    value: fmt$(bot.totalRealizedPnl), sub: `${bot.resolvedCount} RESOLVED`, color: bot.totalRealizedPnl >= 0 ? "hsl(120 100% 55%)" : "hsl(0 90% 55%)", Icon: DollarSign },
+          { label: "WIN RATE",        value: `${bot.winRate}%`, sub: `${bot.won}W / ${bot.lost}L`, color: "hsl(45 100% 55%)", Icon: Award },
+          { label: "LOG RETURN Σ",    value: (bot.cumulativeLogReturn >= 0 ? "+" : "") + (bot.cumulativeLogReturn ?? 0).toFixed(4), sub: `r=ln(f/i) compound`, color: "hsl(270 90% 70%)", Icon: FlaskConical },
+          { label: "COMPOUND RETURN", value: fmtPct(bot.compoundReturnPct ?? 0), sub: `eˢᵘᵐ − 1`, color: (bot.compoundReturnPct ?? 0) >= 0 ? "hsl(120 100% 55%)" : "hsl(0 90% 55%)", Icon: Zap },
         ].map(({ label, value, sub, color, Icon }) => (
           <div
             key={label}
@@ -248,6 +251,86 @@ export default function Portfolio() {
                 {alpacaTotalPl >= 0 ? "+" : ""}{fmt$(alpacaTotalPl)}
               </span>
             </div>
+          </div>
+        )}
+      </Panel>
+
+      {/* ── Polymarket CLOB Trades ── */}
+      <Panel
+        title="POLYMARKET CLOB TRADES"
+        icon={Zap}
+        iconColor="hsl(45 100% 55%)"
+        badge={
+          <span style={{
+            fontFamily: "var(--font-pixel)", fontSize: 6, padding: "2px 7px",
+            border: `1px solid hsl(45 100% 55% / 0.4)`,
+            color: "hsl(45 100% 60%)",
+            letterSpacing: "0.08em",
+          }}>
+            [{clob.count}] TRADES · P&L: {clob.totalPnl >= 0 ? "+" : ""}{fmt$(clob.totalPnl)}
+          </span>
+        }
+      >
+        {clob.trades.length === 0 ? (
+          <div style={{ padding: "20px", textAlign: "center", fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(120 20% 25%)" }}>
+            NO CLOB TRADES YET — WAITING FOR SIGNALS
+          </div>
+        ) : (
+          <div>
+            {/* Header */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 50px 60px 55px 70px 60px",
+              padding: "6px 12px",
+              borderBottom: "1px solid hsl(120 20% 8%)",
+            }}>
+              {["MARKET", "DIR", "BET", "EDGE", "STATUS", "LOG r"].map(h => (
+                <div key={h} style={{ fontFamily: "var(--font-pixel)", fontSize: 6, color: "hsl(120 20% 25%)", letterSpacing: "0.08em", textAlign: h === "MARKET" ? "left" as const : "right" as const }}>{h}</div>
+              ))}
+            </div>
+            {clob.trades.map((t: any, i: number) => {
+              const isYes = t.direction === "YES" || t.direction === "BUY";
+              const isWon = t.status === "won";
+              const isLost = t.status === "lost";
+              const isOpen = !isWon && !isLost;
+              const statusColor = isWon ? "hsl(120 100% 55%)" : isLost ? "hsl(0 90% 55%)" : "hsl(45 100% 55%)";
+              const logR = t.logReturn ?? null;
+              return (
+                <div key={i} style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 50px 60px 55px 70px 60px",
+                  padding: "7px 12px",
+                  borderBottom: "1px solid hsl(120 15% 7%)",
+                  alignItems: "center",
+                }}>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 8, color: "hsl(120 50% 50%)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>
+                    {t.market?.length > 40 ? t.market.slice(0, 40) + "…" : t.market}
+                  </div>
+                  <div style={{ textAlign: "right" as const, fontFamily: "var(--font-pixel)", fontSize: 7, color: isYes ? "hsl(120 100% 60%)" : "hsl(0 90% 60%)" }}>
+                    {t.direction}
+                  </div>
+                  <div style={{ textAlign: "right" as const, fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(120 60% 50%)" }}>
+                    {fmt$(t.betSize)}
+                  </div>
+                  <div style={{ textAlign: "right" as const, fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(270 80% 65%)" }}>
+                    {t.edge > 0 ? `+${t.edge.toFixed(1)}%` : `${t.edge?.toFixed(1)}%`}
+                  </div>
+                  <div style={{ textAlign: "right" as const }}>
+                    <span style={{
+                      fontFamily: "var(--font-pixel)", fontSize: 6,
+                      color: statusColor,
+                      padding: "1px 4px",
+                      border: `1px solid ${statusColor}40`,
+                    }}>
+                      {isOpen ? "OPEN" : isWon ? `+${fmt$(t.pnl)}` : fmt$(t.pnl)}
+                    </span>
+                  </div>
+                  <div style={{ textAlign: "right" as const, fontFamily: "var(--font-mono)", fontSize: 9, color: logR === null ? "hsl(120 15% 25%)" : logR >= 0 ? "hsl(120 100% 55%)" : "hsl(0 90% 55%)" }}>
+                    {logR === null ? "—" : (logR >= 0 ? "+" : "") + logR.toFixed(4)}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </Panel>

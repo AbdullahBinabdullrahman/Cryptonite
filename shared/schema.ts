@@ -29,6 +29,7 @@ export const trades = sqliteTable("trades", {
   edgeDetected: real("edge_detected").notNull(),
   status: text("status").notNull().default("open"), // "open" | "won" | "lost" | "pending" | "filled" | "rejected"
   pnl: real("pnl").notNull().default(0),
+  logReturn: real("log_return"),          // ln(final/initial) — compounding metric
   // Alpaca order tracking
   alpacaOrderId: text("alpaca_order_id"),
   alpacaOrderStatus: text("alpaca_order_status"),   // "new" | "filled" | "canceled" | "rejected"

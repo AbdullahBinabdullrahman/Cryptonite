@@ -247,8 +247,16 @@ class SqliteStorage implements IStorage {
 
   async resolveTrade(id: number, status: "won" | "lost", pnl: number): Promise<Trade> {
     const resolvedAt = Math.floor(Date.now() / 1000);
+    // Calculate log return: r = ln(final / initial)
+    // final = betSize + pnl, initial = betSize
+    const trade = db.select().from(schema.trades).where(eq(schema.trades.id, id)).get();
+    let logReturn: number | null = null;
+    if (trade && trade.bet_size > 0) {
+      const finalValue = trade.bet_size + pnl;
+      logReturn = finalValue > 0 ? Math.round(Math.log(finalValue / trade.bet_size) * 10000) / 10000 : -Infinity;
+    }
     db.update(schema.trades)
-      .set({ status, pnl, resolvedAt: new Date() })
+      .set({ status, pnl, logReturn, resolvedAt: new Date() })
       .where(eq(schema.trades.id, id))
       .run();
 

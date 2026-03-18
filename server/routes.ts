@@ -239,12 +239,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       };
     });
 
-    // 3. Resolved P&L summary by asset/market type
+    // 3. Resolved P&L summary
     const totalRealized = resolvedTrades.reduce((s, t) => s + t.pnl, 0);
     const won  = resolvedTrades.filter(t => t.status === "won").length;
     const lost = resolvedTrades.filter(t => t.status === "lost").length;
 
-    // 4. All-time P&L by day (for sparkline)
+    // 4. Cumulative log return: sum of all ln(final/initial) per resolved trade
+    const resolvedWithLog = resolvedTrades.filter(t => t.logReturn != null && isFinite(t.logReturn as number));
+    const cumulativeLogReturn = resolvedWithLog.reduce((s, t) => s + (t.logReturn as number), 0);
+    // Convert to compound return %: (e^sum - 1) * 100
+    const compoundReturnPct = Math.round((Math.exp(cumulativeLogReturn) - 1) * 10000) / 100;
+
+    // 5. All-time P&L by day (for sparkline)
     const byDay: Record<string, number> = {};
     for (const t of resolvedTrades) {
       if (!t.resolvedAt) continue;
@@ -254,6 +260,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const pnlByDay = Object.entries(byDay)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, pnl]) => ({ date, pnl: Math.round(pnl * 100) / 100 }));
+
+    // 6. CLOB / Polymarket trades (identified by Polymarket market names)
+    const clobTrades = allTrades
+      .filter(t => t.market?.toLowerCase().includes("up or down") || t.market?.toLowerCase().includes("polymarket") || (t.alpacaOrderId && t.alpacaOrderId.startsWith("0x")))
+      .slice(-50)
+      .reverse()
+      .map(t => ({
+        id: t.id,
+        market: t.market,
+        direction: t.direction,
+        betSize: t.betSize,
+        entryOdds: t.entryOdds,
+        edge: t.edgeDetected,
+        status: t.status,
+        pnl: t.pnl,
+        logReturn: t.logReturn ?? null,
+        createdAt: t.createdAt,
+        resolvedAt: t.resolvedAt,
+      }));
 
     res.json({
       alpaca: {
@@ -271,6 +296,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         lost,
         winRate: resolvedTrades.length > 0 ? Math.round((won / resolvedTrades.length) * 1000) / 10 : 0,
         pnlByDay,
+        cumulativeLogReturn: Math.round(cumulativeLogReturn * 10000) / 10000,
+        compoundReturnPct,
+      },
+      clob: {
+        trades: clobTrades,
+        count: clobTrades.length,
+        totalPnl: Math.round(clobTrades.filter(t => t.status === "won" || t.status === "lost").reduce((s, t) => s + t.pnl, 0) * 100) / 100,
       },
       account: {
         totalBalance: settings.totalBalance,
