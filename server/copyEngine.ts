@@ -12,8 +12,8 @@ import { storage } from "./storage";
 import { fetchWalletTrades, placeClobOrder } from "./polymarketClient";
 
 // Our Polymarket credentials (from user config)
-const POLY_PRIVATE_KEY    = "019cec4d-35f6-7db6-9702-a189b1a21bb9";
-const POLY_FUNDER_ADDRESS = "0x4e2355789ae74089cdeea5d091e43567447e6093";
+const POLY_PRIVATE_KEY    = process.env.POLY_PRIVATE_KEY    || "";
+const POLY_FUNDER_ADDRESS = process.env.POLY_FUNDER_ADDRESS || "0xeb0ad9B38733D5e7A51F1120d2d2e63055aAC3Af";
 
 let copyInterval: ReturnType<typeof setInterval> | null = null;
 

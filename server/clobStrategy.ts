@@ -423,8 +423,15 @@ async function findEdgeOpps(markets: ClobMarket[], bayesMap: Record<string, Baye
 // ─── Place order ──────────────────────────────────────────────────────────────
 
 async function placeBet(opp: EdgeOpp, balance: number, settings: any): Promise<boolean> {
-  const pk  = settings.polyPrivateKey    || process.env.POLY_PRIVATE_KEY    || "019cec4d-35f6-7db6-9702-a189b1a21bb9";
-  const fdr = settings.polyFunderAddress || process.env.POLY_FUNDER_ADDRESS || "0x4e2355789ae74089cdeea5d091e43567447e6093";
+  const pk  = settings.polyPrivateKey    || process.env.POLY_PRIVATE_KEY    || "";
+  const fdr = settings.polyFunderAddress || process.env.POLY_FUNDER_ADDRESS || "0xeb0ad9B38733D5e7A51F1120d2d2e63055aAC3Af";
+
+  // Guard: private key must be a 64-char hex string (0x + 64 chars = 66, or bare 64)
+  const pkClean = pk.startsWith("0x") ? pk.slice(2) : pk;
+  if (pkClean.length !== 64) {
+    console.warn("[CLOB] POLY_PRIVATE_KEY not set or invalid — skipping order. Set it in Render env vars.");
+    return false;
+  }
 
   // Kelly-sized bet, clamped between MIN_BET and MAX_BET
   const rawBet = balance * opp.kellyFraction;
