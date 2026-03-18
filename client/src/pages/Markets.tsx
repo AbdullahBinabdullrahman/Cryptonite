@@ -167,7 +167,8 @@ export default function Markets() {
   const { data: clobData, isLoading: clobLoading, refetch: refetchClob } = useQuery({
     queryKey: ["/api/clob/markets"],
     queryFn: () => apiRequest("GET", "/api/clob/markets").then((r) => r.json()),
-    refetchInterval: 15000,
+    refetchInterval: 30000,
+    staleTime: 20000,
   });
 
   const allMarkets: any[]  = clobData?.markets ?? [];

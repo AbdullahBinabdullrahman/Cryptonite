@@ -388,12 +388,13 @@ export default function CopyTrade() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [activeTab, setActiveTab] = useState<"wallets" | "trades">("wallets");
 
-  const { data: wallets = [], isLoading: walletsLoading } = useQuery({ queryKey: ["/api/copy/wallets"], refetchInterval: 30000 });
-  const { data: stats } = useQuery({ queryKey: ["/api/copy/stats"], refetchInterval: 30000 });
+  const { data: wallets = [], isLoading: walletsLoading } = useQuery({ queryKey: ["/api/copy/wallets"], refetchInterval: 60000, staleTime: 30000 });
+  const { data: stats } = useQuery({ queryKey: ["/api/copy/stats"], refetchInterval: 60000, staleTime: 30000 });
   const { data: copyTrades = [], isLoading: tradesLoading } = useQuery({
     queryKey: ["/api/copy/trades"],
     queryFn: () => apiRequest("GET", "/api/copy/trades?limit=100").then((r) => r.json()),
-    refetchInterval: 10000,
+    refetchInterval: 20000,
+    staleTime: 15000,
   });
 
   const syncMutation = useMutation({

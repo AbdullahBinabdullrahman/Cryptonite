@@ -336,7 +336,7 @@ export default function TerminalChat() {
   const abortRef = useRef<AbortController | null>(null);
 
   // Live dashboard data for /status command
-  const { data: dashData } = useQuery({ queryKey: ["/api/dashboard"], refetchInterval: 10000 });
+  const { data: dashData } = useQuery({ queryKey: ["/api/dashboard"], refetchInterval: 30000, staleTime: 20000 });
 
   // Boot animation
   useEffect(() => {

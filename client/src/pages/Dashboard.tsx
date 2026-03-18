@@ -297,22 +297,25 @@ export default function Dashboard() {
   const prevTradeCount = useRef(0);
   const [newTradeIds, setNewTradeIds] = useState<Set<number>>(new Set());
 
-  const { data, isLoading } = useQuery({ queryKey: ["/api/dashboard"], refetchInterval: 5000 });
+  const { data, isLoading } = useQuery({ queryKey: ["/api/dashboard"], refetchInterval: 15000, staleTime: 10000 });
   const { data: alpacaData } = useQuery({
     queryKey: ["/api/alpaca/account"],
     queryFn: () => apiRequest("GET", "/api/alpaca/account").then((r) => r.json()),
-    refetchInterval: 30000,
+    refetchInterval: 60000,
+    staleTime: 30000,
     retry: false,
   });
   const { data: trades, isLoading: tradesLoading } = useQuery({
     queryKey: ["/api/trades"],
     queryFn: () => apiRequest("GET", "/api/trades?limit=10").then((r) => r.json()),
-    refetchInterval: 5000,
+    refetchInterval: 20000,
+    staleTime: 15000,
   });
   const { data: edges } = useQuery({
     queryKey: ["/api/edges"],
     queryFn: () => apiRequest("GET", "/api/edges?limit=5").then((r) => r.json()),
-    refetchInterval: 5000,
+    refetchInterval: 20000,
+    staleTime: 15000,
   });
 
   useEffect(() => {

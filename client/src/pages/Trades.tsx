@@ -104,7 +104,8 @@ export default function Trades() {
   const { data: trades, isLoading } = useQuery({
     queryKey: ["/api/trades"],
     queryFn: () => apiRequest("GET", "/api/trades?limit=200").then((r) => r.json()),
-    refetchInterval: 5000,
+    refetchInterval: 20000,
+    staleTime: 15000,
   });
 
   const syncMutation = useMutation({

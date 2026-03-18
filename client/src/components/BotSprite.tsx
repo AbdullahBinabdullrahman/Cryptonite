@@ -313,7 +313,7 @@ export function BotSprite({ state = "idle", size = 4, label = true, className }:
 import { useQuery } from "@tanstack/react-query";
 
 export function LiveBotSprite({ size = 4, label = true, className }: Omit<BotSpriteProps, "state">) {
-  const { data } = useQuery({ queryKey: ["/api/dashboard"], refetchInterval: 5000 });
+  const { data } = useQuery({ queryKey: ["/api/dashboard"], refetchInterval: 15000, staleTime: 10000 });
   const d: any = data || {};
 
   let spriteState: SpriteState = "idle";

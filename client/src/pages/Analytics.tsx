@@ -170,8 +170,8 @@ export default function Analytics() {
   const [bootIdx, setBootIdx] = useState(0);
   const [bootDone, setBootDone] = useState(false);
 
-  const { data } = useQuery<any>({ queryKey: ["/api/analytics"],      refetchInterval: 15000 });
-  const { data: stratData } = useQuery<any>({ queryKey: ["/api/strategy-state"], refetchInterval: 5000 });
+  const { data } = useQuery<any>({ queryKey: ["/api/analytics"],      refetchInterval: 30000, staleTime: 20000 });
+  const { data: stratData } = useQuery<any>({ queryKey: ["/api/strategy-state"], refetchInterval: 15000, staleTime: 10000 });
 
   useEffect(() => {
     if (bootIdx < BOOT.length) {

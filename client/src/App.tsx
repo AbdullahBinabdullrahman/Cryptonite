@@ -36,7 +36,7 @@ const NAV_ITEMS = [
 
 // ── Bot status display ────────────────────────────────────────────────────────
 function BotStatus() {
-  const { data } = useQuery({ queryKey: ["/api/dashboard"], refetchInterval: 5000 });
+  const { data } = useQuery({ queryKey: ["/api/dashboard"], refetchInterval: 15000, staleTime: 10000 });
   const d: any = data || {};
   const running = d.isRunning === true;
   const pnl = d.todayPnl ?? 0;
