@@ -9,7 +9,7 @@ import {
 type Step = "credentials" | "otp" | "totp" | "totp-setup";
 
 interface LoginProps {
-  onLogin: (email: string) => void;
+  onLogin: (email: string, password?: string) => void;
 }
 
 // ── OTP digit input ───────────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ export default function Login({ onLogin }: LoginProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Login failed");
       if (data.totpRequired) { setStep("totp"); return; }
-      onLogin(data.email);
+      onLogin(data.email, password);
     } catch (e: any) {
       toast({ title: "ACCESS DENIED", description: e.message, variant: "destructive" });
     } finally {
