@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import ConnectSqlite3 from "connect-sqlite3";
 import path from "path";
+import fs from "fs";
 import { registerRoutes } from "./routes";
 import { registerChatRoutes } from "./chatRoutes";
 import { serveStatic } from "./static";
@@ -22,9 +23,26 @@ declare module "http" {
 
 // ── Session ───────────────────────────────────────────────────────────────────
 // SQLite-backed session store — survives server restarts, 30-day rolling TTL
-const dbDir = process.env.NODE_ENV === "production"
-  ? "/data"
-  : path.resolve(process.cwd(), "data");
+// Use /data (Render persistent disk) if available, else fall back to CWD/data
+function resolveDbDir(): string {
+  const candidates = [
+    process.env.DATA_DIR,
+    "/data",
+    path.resolve(process.cwd(), "data"),
+  ];
+  for (const dir of candidates) {
+    if (!dir) continue;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      // Test write access
+      fs.accessSync(dir, fs.constants.W_OK);
+      return dir;
+    } catch (_) { /* try next */ }
+  }
+  return "/tmp"; // absolute last resort
+}
+
+const dbDir = resolveDbDir();
 
 app.use(
   session({
