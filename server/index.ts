@@ -1,10 +1,15 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
+import ConnectSqlite3 from "connect-sqlite3";
+import path from "path";
 import { registerRoutes } from "./routes";
 import { registerChatRoutes } from "./chatRoutes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initAuthTables } from "./auth";
+import { storage } from "./storage";
+
+const SqliteStore = ConnectSqlite3(session);
 
 const app = express();
 const httpServer = createServer(app);
@@ -16,17 +21,28 @@ declare module "http" {
 }
 
 // ── Session ───────────────────────────────────────────────────────────────────
-// Simple memory store for sessions (persisted across restarts via SQLite below)
+// SQLite-backed session store — survives server restarts, 30-day rolling TTL
+const dbDir = process.env.NODE_ENV === "production"
+  ? "/data"
+  : path.resolve(process.cwd(), "data");
+
 app.use(
   session({
+    store: new (SqliteStore as any)({
+      db: "sessions.sqlite",
+      dir: dbDir,
+      table: "sessions",
+      concurrentDB: true,
+    }),
     secret: process.env.SESSION_SECRET || "polybot-super-secret-key-change-in-prod",
     resave: false,
     saveUninitialized: false,
+    rolling: true,
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days, refreshed on each request
     },
   })
 );
@@ -96,6 +112,22 @@ app.use((req, res, next) => {
 (async () => {
   // Init auth tables
   initAuthTables();
+
+  // ── Auto-load credentials from Render env vars ──────────────────────────────
+  // If ALPACA_KEY / POLY keys are set in environment (via Render dashboard),
+  // inject them into the DB so the user never has to enter them in the UI.
+  try {
+    const envUpdates: Record<string, string> = {};
+    if (process.env.ALPACA_KEY)          envUpdates.alpacaApiKey     = process.env.ALPACA_KEY;
+    if (process.env.ALPACA_SECRET)       envUpdates.alpacaApiSecret  = process.env.ALPACA_SECRET;
+    if (process.env.POLY_FUNDER_ADDRESS) envUpdates.polymarketWallet = process.env.POLY_FUNDER_ADDRESS;
+    if (Object.keys(envUpdates).length > 0) {
+      await storage.updateBotSettings(envUpdates);
+      console.log("[boot] Injected env credentials into DB:", Object.keys(envUpdates).join(", "));
+    }
+  } catch (e) {
+    console.warn("[boot] Could not auto-inject env credentials:", e);
+  }
 
   await registerRoutes(httpServer, app);
   registerChatRoutes(app);
