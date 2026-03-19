@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, setAuthToken } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
   Zap, Mail, Shield, Smartphone, ArrowRight, Loader2,
@@ -9,7 +9,7 @@ import {
 type Step = "credentials" | "otp" | "totp" | "totp-setup";
 
 interface LoginProps {
-  onLogin: (email: string, password?: string) => void;
+  onLogin: (email: string) => void;
 }
 
 // ── OTP digit input ───────────────────────────────────────────────────────────
@@ -132,7 +132,8 @@ export default function Login({ onLogin }: LoginProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Login failed");
       if (data.totpRequired) { setStep("totp"); return; }
-      onLogin(data.email, password);
+      if (data.token) setAuthToken(data.token);
+      onLogin(data.email);
     } catch (e: any) {
       toast({ title: "ACCESS DENIED", description: e.message, variant: "destructive" });
     } finally {
@@ -165,6 +166,7 @@ export default function Login({ onLogin }: LoginProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Invalid code");
       if (data.totpEnabled) { setStep("totp"); setLoading(false); return; }
+      if (data.token) setAuthToken(data.token);
       onLogin(data.email);
     } catch (e: any) {
       toast({ title: "INVALID TOKEN", description: e.message, variant: "destructive" });
@@ -178,6 +180,7 @@ export default function Login({ onLogin }: LoginProps) {
       const res  = await apiRequest("POST", "/api/auth/verify", { email: email.trim(), totpToken: token });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Invalid code");
+      if (data.token) setAuthToken(data.token);
       onLogin(data.email);
     } catch (e: any) {
       toast({ title: "INVALID TOKEN", description: e.message, variant: "destructive" });

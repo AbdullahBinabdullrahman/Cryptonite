@@ -11,7 +11,7 @@ import { fetchWalletPositions } from "./polymarketClient";
 import {
   sendOtpEmail, verifyOtp, verifyTotp,
   generateTotpSetup, enableTotp, getUserById, requireAuth,
-  setUserPassword, verifyPassword,
+  setUserPassword, verifyPassword, issueToken, getUserIdFromRequest,
 } from "./auth";
 import { z } from "zod";
 import { insertCopiedWalletSchema } from "@shared/schema";
@@ -28,7 +28,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Check session
   app.get("/api/auth/me", (req, res) => {
-    const userId = (req.session as any)?.userId;
+    const userId = getUserIdFromRequest(req);
     if (!userId) return res.status(401).json({ loggedIn: false });
     const user = getUserById(userId);
     if (!user) return res.status(401).json({ loggedIn: false });
@@ -64,11 +64,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     if (!result.ok) return res.status(401).json({ error: result.error });
 
-    // Set session
+    // Set session + issue JWT
     (req.session as any).userId = result.userId;
     req.session.save(() => {
       const user = getUserById(result.userId!);
-      res.json({ ok: true, email: user.email, totpEnabled: !!user.totp_enabled });
+      const token = issueToken(result.userId!);
+      res.json({ ok: true, email: user.email, totpEnabled: !!user.totp_enabled, token });
     });
   });
 
@@ -110,7 +111,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     (req.session as any).userId = result.userId;
     req.session.save(() => {
       const user = getUserById(result.userId!);
-      res.json({ ok: true, email: user.email, totpEnabled: false });
+      const token = issueToken(result.userId!);
+      res.json({ ok: true, email: user.email, totpEnabled: false, token });
     });
   });
 

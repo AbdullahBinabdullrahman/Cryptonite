@@ -6,6 +6,21 @@ const API_BASE = typeof window !== "undefined" && window.location.hostname !== "
   ? RENDER_URL
   : "";
 
+// ── In-memory JWT store ───────────────────────────────────────────────────────
+// Stored in module scope — survives page navigation but resets on hard refresh.
+// On refresh, /api/auth/me is called; if it fails, the user sees the login page
+// which re-issues a token (auto-filled email means one click to re-login).
+let _authToken: string | null = null;
+
+export function setAuthToken(token: string | null) { _authToken = token; }
+export function getAuthToken(): string | null { return _authToken; }
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const h: Record<string, string> = { ...extra };
+  if (_authToken) h["Authorization"] = `Bearer ${_authToken}`;
+  return h;
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -20,10 +35,16 @@ export async function apiRequest(
 ): Promise<Response> {
   const res = await fetch(`${API_BASE}${url}`, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers: authHeaders(data ? { "Content-Type": "application/json" } : {}),
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
+
+  // If the response contains a new token (login/verify), store it
+  if (res.headers.get("content-type")?.includes("application/json")) {
+    const clone = res.clone();
+    clone.json().then(d => { if (d?.token) setAuthToken(d.token); }).catch(() => {});
+  }
 
   await throwIfResNotOk(res);
   return res;
@@ -36,6 +57,7 @@ export const getQueryFn: <T>(options: {
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     const res = await fetch(`${API_BASE}${queryKey.join("/")}`, {
+      headers: authHeaders(),
       credentials: "include",
     });
 

@@ -321,6 +321,43 @@ export function verifyTotp(email: string, token: string): { ok: boolean; userId?
 import type { Request, Response, NextFunction } from "express";
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if ((req.session as any)?.userId) return next();
+  if (getUserIdFromRequest(req) !== null) return next();
   res.status(401).json({ error: "Unauthorised", code: "NOT_LOGGED_IN" });
+}
+
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.SESSION_SECRET || "polybot-super-secret-key-change-in-prod";
+const JWT_TTL    = 30 * 24 * 60 * 60; // 30 days in seconds
+
+/** Issue a signed JWT for a userId */
+export function issueToken(userId: number): string {
+  return jwt.sign({ uid: userId }, JWT_SECRET, { expiresIn: JWT_TTL });
+}
+
+/** Extract userId from session cookie OR Bearer token */
+export function getUserIdFromRequest(req: Request): number | null {
+  // 1. Session cookie (legacy path — keep working if it does)
+  const sessionId = (req.session as any)?.userId;
+  if (sessionId) return sessionId;
+
+  // 2. Authorization: Bearer <token>
+  const authHeader = req.headers["authorization"] || "";
+  if (authHeader.startsWith("Bearer ")) {
+    try {
+      const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as any;
+      return payload?.uid ?? null;
+    } catch (_) { return null; }
+  }
+
+  // 3. X-Auth-Token header (fallback)
+  const tokenHeader = req.headers["x-auth-token"] as string | undefined;
+  if (tokenHeader) {
+    try {
+      const payload = jwt.verify(tokenHeader, JWT_SECRET) as any;
+      return payload?.uid ?? null;
+    } catch (_) { return null; }
+  }
+
+  return null;
 }

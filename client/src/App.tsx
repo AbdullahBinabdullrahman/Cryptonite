@@ -321,22 +321,9 @@ function AppShell() {
   );
 }
 
-// ── Persist credentials in localStorage for silent re-auth ───────────────────
-const CRED_KEY = "pb_creds";
-function saveCreds(email: string, password: string) {
-  try { localStorage.setItem(CRED_KEY, JSON.stringify({ email, password })); } catch (_) {}
-}
-function loadCreds(): { email: string; password: string } | null {
-  try { const v = localStorage.getItem(CRED_KEY); return v ? JSON.parse(v) : null; } catch (_) { return null; }
-}
-function clearCreds() {
-  try { localStorage.removeItem(CRED_KEY); } catch (_) {}
-}
-
 // ── Auth gate (needs QueryClientProvider as parent) ───────────────────────────
 function AuthGate() {
   const [authedEmail, setAuthedEmail] = useState<string | null>(null);
-  const [silentLoading, setSilentLoading] = useState(false);
 
   const { data: authData, isLoading } = useQuery({
     queryKey: ["/api/auth/me"],
@@ -345,26 +332,7 @@ function AuthGate() {
     staleTime: 60000,
   });
 
-  // Silent re-auth: if session expired but we have saved creds, login quietly
-  useEffect(() => {
-    if (isLoading || authData?.loggedIn || authedEmail || silentLoading) return;
-    const creds = loadCreds();
-    if (!creds) return;
-    setSilentLoading(true);
-    apiRequest("POST", "/api/auth/login", { email: creds.email, password: creds.password })
-      .then(r => r.json())
-      .then(data => {
-        if (data.ok || data.loggedIn || data.email) {
-          setAuthedEmail(creds.email);
-        } else {
-          clearCreds(); // bad creds — clear and show login
-        }
-      })
-      .catch(() => { /* network error — show login normally */ })
-      .finally(() => setSilentLoading(false));
-  }, [isLoading, authData, authedEmail, silentLoading]);
-
-  if (isLoading || silentLoading) {
+  if (isLoading) {
     return (
       <div
         className="min-h-screen flex items-center justify-center"
@@ -389,7 +357,7 @@ function AuthGate() {
   if (!authData?.loggedIn && !authedEmail) {
     return (
       <>
-        <Login onLogin={(e, pw) => { if (pw) saveCreds(e, pw); setAuthedEmail(e); }} />
+        <Login onLogin={e => setAuthedEmail(e)} />
         <Toaster />
       </>
     );
