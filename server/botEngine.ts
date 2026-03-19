@@ -702,7 +702,8 @@ async function processAsset(asset: Asset, settings: any) {
   const todayPnl     = await storage.getTodayPnl();
   const maxDailyLoss = settings.totalBalance * (settings.dailyStopLossPct / 100);
 
-  if (todayCount >= settings.maxBetsPerDay) return;
+  const maxBets = settings.maxBetsPerDay ?? 20; // hard cap: 20 trades/day default
+  if (todayCount >= maxBets) return;
   if (todayPnl < -maxDailyLoss) {
     await storage.updateBotSettings({ isRunning: false });
     console.log("[BotEngine] Daily stop-loss hit — bot stopped");
@@ -739,7 +740,7 @@ async function processAsset(asset: Asset, settings: any) {
 
     if (confirmed) {
       await placeOrder(asset, "scalp", scalpResult, price, settings, polyConf);
-      asset.scalpCooldownUntil = now + 90 * 1000; // 90s cooldown per asset
+      asset.scalpCooldownUntil = now + 5 * 60 * 1000; // 5min cooldown per asset (was 90s — too frequent)
     } else {
       console.log(`[BotEngine] ${asset.label} SCALP blocked by Polymarket crowd`);
     }

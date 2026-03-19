@@ -261,8 +261,8 @@ export async function crowdConfirms(asset: string, direction: "buy" | "sell"): P
   const signal = await getPolySignal(asset);
 
   if (!signal) {
-    // No Polymarket data — allow trade (don't block on missing data)
-    return { confirmed: true, signal: null, reason: "no polymarket data — allowing" };
+    // No Polymarket data — BLOCK trade (prevents spam when signal feed is down)
+    return { confirmed: false, signal: null, reason: "no polymarket data — blocking to prevent overtrading" };
   }
 
   if (signal.crowdDirection === "neutral") {
