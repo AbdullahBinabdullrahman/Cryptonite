@@ -9,6 +9,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initAuthTables } from "./auth";
 import { storage } from "./storage";
+import { initMlTables } from "./mlEngine";
 
 const SqliteStore = ConnectSqlite3(session);
 
@@ -130,6 +131,7 @@ app.use((req, res, next) => {
 (async () => {
   // Init auth tables
   initAuthTables();
+  initMlTables();
 
   // ── Auto-load credentials from Render env vars ──────────────────────────────
   // If ALPACA_KEY / POLY keys are set in environment (via Render dashboard),

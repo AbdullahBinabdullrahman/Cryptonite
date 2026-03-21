@@ -22,6 +22,7 @@
 import { storage } from "./storage";
 import { placeAlpacaOrder, fetchOrderStatus } from "./alpacaOrders";
 import { crowdConfirms } from "./polymarketSignal";
+import { logPrediction, getBaseRate, ensembleScore, boostedVoteCount, BOOSTED_VOTE_THRESHOLD, resolvePrediction } from "./mlEngine";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // SECTION 1 — SHARED UTILITIES
@@ -623,6 +624,20 @@ async function placeOrder(
   const market = asset.markets.find(m => m.id.includes(mode)) ?? asset.markets[0];
 
   console.log(`[BotEngine] ${asset.label} ${modeLabel.toUpperCase()} BUY $${betSize} | session=${getSessionName()} votes=${vote.score}/5 rsi=${asset.rsi.value ?? "?"} str=${vote.avgStrength.toFixed(2)}`);
+
+  // Log prediction for ML calibration + bootstrap tracking
+  const baseRate = getBaseRate(`${asset.label}_${mode}`);
+  const blendedQ  = (impliedOdds * 0.6) + (baseRate * 0.4); // blend model + base rate
+  const predId = logPrediction({
+    asset:    asset.label,
+    mode:     mode.toUpperCase(),
+    direction: "BUY",
+    pred_q:   Math.round(blendedQ * 1000) / 1000,
+    market_p: Math.round(impliedOdds * 1000) / 1000,
+    ev:       Math.round((blendedQ - impliedOdds) * 1000) / 1000,
+    kelly_f:  Math.round((rawKelly / (settings.totalBalance || 1)) * 10000) / 10000,
+    signals:  vote.votes.map(v => ({ name: v.name, fired: v.vote === "buy", confidence: v.strength })),
+  });
 
   const opp = await storage.createEdgeOpportunity({
     market:      `${modeLabel} ${market.name}`,

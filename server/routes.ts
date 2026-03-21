@@ -14,6 +14,7 @@ import {
   setUserPassword, verifyPassword, issueToken, getUserIdFromRequest,
 } from "./auth";
 import { z } from "zod";
+import { getMLStats } from "./mlEngine";
 import { insertCopiedWalletSchema } from "@shared/schema";
 
 // Start engines on server boot
@@ -780,6 +781,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── Live strategy state (for Analytics page) ──────────────────────────────
+  // ML Engine stats — calibration, bootstrap CI, signal weights, base rates
+  app.get("/api/ml-stats", requireAuth, (_req, res) => {
+    try {
+      res.json(getMLStats());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/strategy-state", (_req, res) => {
     try {
       const state = getLiveStrategyState();

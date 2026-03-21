@@ -172,6 +172,7 @@ export default function Analytics() {
 
   const { data } = useQuery<any>({ queryKey: ["/api/analytics"],      refetchInterval: 30000, staleTime: 20000 });
   const { data: stratData } = useQuery<any>({ queryKey: ["/api/strategy-state"], refetchInterval: 15000, staleTime: 10000 });
+  const { data: mlData }    = useQuery<any>({ queryKey: ["/api/ml-stats"],       refetchInterval: 60000, staleTime: 55000 });
 
   useEffect(() => {
     if (bootIdx < BOOT.length) {
@@ -445,6 +446,123 @@ export default function Analytics() {
                     </div>
                   </div>
                 </Card>
+              </>
+            )}
+
+            {/* ── ML Engine Section ── */}
+            {bootDone && (
+              <>
+                <SectionHeader title="ML ENGINE — ROADMAP STATS" />
+
+                {/* Bootstrap CI + Win Rate */}
+                <Card>
+                  <div style={{ ...px("0.38rem"), color: C.dim, marginBottom: "0.5rem" }}>BOOTSTRAP SIMULATION (10,000 RUNS)</div>
+                  {mlData?.bootstrap ? (
+                    <>
+                      <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+                        <StatBox label="WIN RATE" value={`${((mlData.bootstrap.mean || 0)*100).toFixed(1)}%`} color={mlData.bootstrap.mean > 0.55 ? C.green : C.amber} />
+                        <StatBox label="95% CI LOW" value={`${((mlData.bootstrap.ci_low || 0)*100).toFixed(1)}%`} color={C.cyan} />
+                        <StatBox label="95% CI HIGH" value={`${((mlData.bootstrap.ci_high || 0)*100).toFixed(1)}%`} color={C.cyan} />
+                        <StatBox label="TRADES" value={`${mlData.bootstrap.n_trades}`} color={C.dim} />
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                        <Bar pct={(mlData.bootstrap.ci_low || 0)*100} color={mlData.bootstrap.edge_confirmed ? C.green : C.amber} height={4} />
+                        <div style={{ ...mono("0.5rem"), color: mlData.bootstrap.edge_confirmed ? C.green : C.amber, whiteSpace: "nowrap" }}>
+                          {mlData.bootstrap.edge_confirmed ? "✓ EDGE CONFIRMED" : "⚠ NEED MORE DATA"}
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ ...mono("0.55rem"), color: C.dim }}>COLLECTING TRADE OUTCOMES<span className="blink">_</span></div>
+                  )}
+                </Card>
+
+                {/* Signal Weights (XGBoost boosting) */}
+                {mlData?.top_signals?.length > 0 && (
+                  <Card>
+                    <div style={{ ...px("0.38rem"), color: C.dim, marginBottom: "0.5rem" }}>SIGNAL WEIGHTS — XGBOOST BOOSTING</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+                      {mlData.top_signals.slice(0, 8).map((sig: any) => (
+                        <div key={sig.name} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                          <div style={{ ...mono("0.52rem"), color: C.green, width: "7rem", flexShrink: 0 }}>{sig.name}</div>
+                          <Bar pct={(sig.weight / 3) * 100} color={sig.weight > 1.2 ? C.green : sig.weight < 0.8 ? C.red : C.amber} height={5} />
+                          <div style={{ ...mono("0.5rem"), color: C.dim, width: "3rem", textAlign: "right" }}>{sig.weight.toFixed(2)}x</div>
+                          <div style={{ ...mono("0.48rem"), color: C.dim }}>{(sig.accuracy*100).toFixed(0)}% acc</div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Win rate by mode */}
+                {mlData?.win_rate_by_mode && Object.keys(mlData.win_rate_by_mode).length > 0 && (
+                  <Card>
+                    <div style={{ ...px("0.38rem"), color: C.dim, marginBottom: "0.5rem" }}>WIN RATE BY MODE</div>
+                    <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                      {Object.entries(mlData.win_rate_by_mode).map(([mode, m]: [string, any]) => (
+                        <StatBox key={mode} label={mode} value={`${(m.rate*100).toFixed(0)}%`}
+                          sub={`${m.wins}/${m.total}`}
+                          color={m.rate > 0.6 ? C.green : m.rate > 0.5 ? C.amber : C.red} />
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Base rates */}
+                {mlData?.base_rates?.length > 0 && (
+                  <Card>
+                    <div style={{ ...px("0.38rem"), color: C.dim, marginBottom: "0.5rem" }}>BASE RATES — HISTORICAL FREQUENCY</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                      {mlData.base_rates.slice(0, 8).map((br: any) => (
+                        <div key={br.category} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                          <div style={{ ...mono("0.52rem"), color: C.green, width: "7rem", flexShrink: 0 }}>{br.category}</div>
+                          <Bar pct={br.rate*100} color={br.rate > 0.55 ? C.green : C.amber} height={5} />
+                          <div style={{ ...mono("0.5rem"), color: C.dim }}>{(br.rate*100).toFixed(0)}% ({br.total})</div>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {/* Calibration */}
+                {mlData?.calibration?.length > 0 && (
+                  <Card>
+                    <div style={{ ...px("0.38rem"), color: C.dim, marginBottom: "0.4rem" }}>PROBABILITY CALIBRATION</div>
+                    <div style={{ ...mono("0.45rem"), color: C.dim, marginBottom: "0.4rem" }}>PREDICTED vs ACTUAL (perfect = diagonal)</div>
+                    <div style={{ display: "flex", gap: "3px", alignItems: "flex-end", height: 60, width: "100%" }}>
+                      {mlData.calibration.map((b: any) => (
+                        <div key={b.bucket_low} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+                          <div style={{ width: "100%", height: `${Math.round(b.actual_rate * 52)}px`, background: C.green, minHeight: 1, boxShadow: `0 0 3px ${C.green}60` }} />
+                          <div style={{ width: "100%", height: `${Math.round(b.predicted_mean * 52)}px`, background: C.amber + "60", minHeight: 1 }} />
+                          <div style={{ ...mono("0.38rem"), color: C.dim }}>{(b.bucket_low*10).toFixed(0)}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: "0.6rem", marginTop: "0.3rem" }}>
+                      <span style={{ ...mono("0.42rem"), color: C.green }}>█ ACTUAL</span>
+                      <span style={{ ...mono("0.42rem"), color: C.amber }}>█ PREDICTED</span>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Avg EV + Kelly */}
+                {mlData && (
+                  <Card mb={false}>
+                    <div style={{ ...px("0.38rem"), color: C.dim, marginBottom: "0.4rem" }}>AVERAGE METRICS</div>
+                    <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                      <StatBox label="AVG EV" value={`${((mlData.avg_ev||0)*100).toFixed(2)}%`} color={mlData.avg_ev > 0 ? C.green : C.red} />
+                      <StatBox label="AVG KELLY" value={`${((mlData.avg_kelly||0)*100).toFixed(2)}%`} color={C.cyan} />
+                      <StatBox label="PENDING" value={`${mlData.pending||0}`} color={C.dim} />
+                      <StatBox label="RESOLVED" value={`${mlData.resolved||0}`} color={C.dim} />
+                    </div>
+                  </Card>
+                )}
+
+                {!mlData && (
+                  <div style={{ ...mono("0.55rem"), color: C.dim, textAlign: "center", padding: "1rem" }}>
+                    ML ENGINE INITIALIZING<span className="blink">_</span>
+                  </div>
+                )}
               </>
             )}
 
