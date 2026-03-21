@@ -1,695 +1,656 @@
 import React, { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { RefreshCw, Plus, Trash2, Pause, Play, ExternalLink, CheckCircle, XCircle, Clock, Zap } from "lucide-react";
+import {
+  RefreshCw, Plus, Trash2, Pause, Play, ExternalLink,
+  CheckCircle, XCircle, Clock, Zap, Trophy, Star,
+  TrendingUp, Users, Target, GitMerge, Wallet
+} from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function shortAddr(addr: string) { return addr.slice(0, 6) + "…" + addr.slice(-4); }
+function fmt$(n: number) { return (n >= 0 ? "+" : "") + n.toFixed(2); }
+function fmtPct(n: number) { return (n >= 0 ? "+" : "") + n.toFixed(1) + "%"; }
 
-// Corner accent decoration for retro panels
-function CornerAccents({ color = "hsl(120 100% 55%)" }: { color?: string }) {
-  const s = (pos: any) => ({ position: "absolute" as const, width: 8, height: 8, ...pos });
-  return (
-    <>
-      <div style={{ ...s({ top: -1, left: -1 }), borderTop: `2px solid ${color}`, borderLeft: `2px solid ${color}` }} />
-      <div style={{ ...s({ top: -1, right: -1 }), borderTop: `2px solid ${color}`, borderRight: `2px solid ${color}` }} />
-      <div style={{ ...s({ bottom: -1, left: -1 }), borderBottom: `2px solid ${color}`, borderLeft: `2px solid ${color}` }} />
-      <div style={{ ...s({ bottom: -1, right: -1 }), borderBottom: `2px solid ${color}`, borderRight: `2px solid ${color}` }} />
-    </>
-  );
-}
+// ── Design tokens (high contrast retro) ──────────────────────────────────────
+const G  = "hsl(120 100% 65%)";   // bright phosphor green
+const G2 = "hsl(120 100% 45%)";   // dim green
+const AM = "hsl(45 100% 65%)";    // amber/gold
+const CY = "hsl(175 90% 60%)";    // cyan
+const RD = "hsl(0 90% 62%)";      // red
+const BG = "hsl(220 20% 4%)";     // near-black
+const BG2= "hsl(220 18% 8%)";     // slightly lighter panel
+const BG3= "hsl(220 18% 12%)";    // row hover bg
+const BD = `1px solid hsl(120 100% 65% / 0.22)`;  // green border
+
+const PIXEL = { fontFamily: "var(--font-pixel)" } as React.CSSProperties;
+const MONO  = { fontFamily: "var(--font-mono)" }  as React.CSSProperties;
 
 const PANEL: React.CSSProperties = {
-  background: "hsl(220 20% 5%)",
-  border: "1px solid hsl(120 100% 55% / 0.25)",
-  borderRadius: "2px",
-  position: "relative",
+  background: BG2, border: BD, borderRadius: 2, position: "relative",
 };
 
-const PANEL_HDR: React.CSSProperties = {
-  background: "hsl(120 100% 55% / 0.06)",
-  borderBottom: "1px solid hsl(120 100% 55% / 0.2)",
-  padding: "0.5rem 0.875rem",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
+const HDR: React.CSSProperties = {
+  background: `hsl(120 100% 65% / 0.08)`,
+  borderBottom: BD,
+  padding: "0.6rem 1rem",
+  display: "flex", alignItems: "center", justifyContent: "space-between",
 };
 
-const PANEL_TITLE: React.CSSProperties = {
-  fontFamily: "var(--font-pixel)",
-  fontSize: "0.55rem",
-  color: "hsl(120 100% 55%)",
-  letterSpacing: "0.08em",
+const TITLE: React.CSSProperties = {
+  ...PIXEL, fontSize: "0.6rem", color: G, letterSpacing: "0.1em",
+  textTransform: "uppercase" as const,
 };
 
-const MONO: React.CSSProperties = {
-  fontFamily: "var(--font-mono)",
-};
-
-const PIXEL: React.CSSProperties = {
-  fontFamily: "var(--font-pixel)",
-};
-
-// Status badge
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { color: string; bg: string; border: string }> = {
-    pending:   { color: "hsl(45 100% 55%)",  bg: "hsl(45 100% 55% / 0.08)",  border: "hsl(45 100% 55% / 0.3)" },
-    filled:    { color: "hsl(120 100% 55%)", bg: "hsl(120 100% 55% / 0.08)", border: "hsl(120 100% 55% / 0.3)" },
-    failed:    { color: "hsl(0 90% 55%)",    bg: "hsl(0 90% 55% / 0.08)",    border: "hsl(0 90% 55% / 0.3)" },
-    skipped:   { color: "hsl(220 20% 50%)",  bg: "transparent",              border: "hsl(220 20% 30%)" },
-    simulated: { color: "hsl(175 90% 55%)",  bg: "hsl(175 90% 55% / 0.08)", border: "hsl(175 90% 55% / 0.3)" },
+const BTN = (variant: "green" | "amber" | "red" | "ghost" = "green"): React.CSSProperties => {
+  const colors = {
+    green: { bg: `hsl(120 100% 65% / 0.12)`, border: `1px solid ${G}`, color: G },
+    amber: { bg: `hsl(45 100% 65% / 0.12)`,  border: `1px solid ${AM}`, color: AM },
+    red:   { bg: `hsl(0 90% 62% / 0.12)`,    border: `1px solid ${RD}`, color: RD },
+    ghost: { bg: "transparent",              border: `1px solid hsl(120 100% 65% / 0.2)`, color: G2 },
   };
-  const icons: Record<string, React.ReactNode> = {
-    pending:   <Clock size={8} />,
-    filled:    <CheckCircle size={8} />,
-    failed:    <XCircle size={8} />,
-    simulated: <Zap size={8} />,
-    skipped:   <span>—</span>,
+  return {
+    ...PIXEL, fontSize: "0.52rem", letterSpacing: "0.06em",
+    padding: "0.4rem 0.75rem", borderRadius: 2, cursor: "pointer",
+    display: "inline-flex", alignItems: "center", gap: "0.3rem",
+    transition: "all 0.15s", ...colors[variant],
   };
-  const style = map[status] || map.skipped;
+};
+
+const INPUT: React.CSSProperties = {
+  ...MONO, background: BG, border: BD, borderRadius: 2, color: G,
+  padding: "0.4rem 0.6rem", width: "100%", fontSize: "0.8rem", outline: "none",
+};
+
+const LABEL: React.CSSProperties = {
+  ...PIXEL, fontSize: "0.48rem", color: G2, letterSpacing: "0.06em",
+  marginBottom: "0.25rem", display: "block",
+};
+
+// Corner accents
+function CA({ color = G }: { color?: string }) {
+  const s = (pos: any): React.CSSProperties => ({
+    position: "absolute", width: 7, height: 7, ...pos,
+  });
+  return (<>
+    <div style={{ ...s({ top: -1, left: -1 }), borderTop: `2px solid ${color}`, borderLeft: `2px solid ${color}` }} />
+    <div style={{ ...s({ top: -1, right: -1 }), borderTop: `2px solid ${color}`, borderRight: `2px solid ${color}` }} />
+    <div style={{ ...s({ bottom: -1, left: -1 }), borderBottom: `2px solid ${color}`, borderLeft: `2px solid ${color}` }} />
+    <div style={{ ...s({ bottom: -1, right: -1 }), borderBottom: `2px solid ${color}`, borderRight: `2px solid ${color}` }} />
+  </>);
+}
+
+// Rank medal
+function Medal({ rank }: { rank: number }) {
+  if (rank === 1) return <span style={{ color: "#FFD700", fontSize: "1rem" }}>🥇</span>;
+  if (rank === 2) return <span style={{ color: "#C0C0C0", fontSize: "1rem" }}>🥈</span>;
+  if (rank === 3) return <span style={{ color: "#CD7F32", fontSize: "1rem" }}>🥉</span>;
+  return <span style={{ ...PIXEL, fontSize: "0.5rem", color: G2 }}>#{rank}</span>;
+}
+
+// Score bar
+function ScoreBar({ score }: { score: number }) {
+  const pct = Math.round(score * 100);
+  const color = pct > 70 ? G : pct > 40 ? AM : RD;
   return (
-    <span style={{
-      display: "inline-flex",
-      alignItems: "center",
-      gap: "0.25rem",
-      padding: "0.1rem 0.35rem",
-      border: `1px solid ${style.border}`,
-      borderRadius: "2px",
-      background: style.bg,
-      color: style.color,
-      fontSize: "0.58rem",
-      fontFamily: "var(--font-pixel)",
-      letterSpacing: "0.06em",
-      textTransform: "uppercase" as const,
-    }}>
-      {icons[status]}{status}
-    </span>
+    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 80 }}>
+      <div style={{ flex: 1, height: 6, background: BG, borderRadius: 2, overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 2 }} />
+      </div>
+      <span style={{ ...PIXEL, fontSize: "0.5rem", color, minWidth: 28 }}>{pct}%</span>
+    </div>
   );
 }
 
-// ── Add Wallet Form (modal) ────────────────────────────────────────────────────
-function AddWalletForm({ onClose }: { onClose: () => void }) {
+// Status badge
+function Badge({ status }: { status: string }) {
+  const map: Record<string, { c: string; bg: string }> = {
+    pending:   { c: AM,  bg: `hsl(45 100% 65% / 0.1)` },
+    filled:    { c: G,   bg: `hsl(120 100% 65% / 0.1)` },
+    failed:    { c: RD,  bg: `hsl(0 90% 62% / 0.1)` },
+    skipped:   { c: G2,  bg: "transparent" },
+    simulated: { c: CY,  bg: `hsl(175 90% 60% / 0.1)` },
+    active:    { c: G,   bg: `hsl(120 100% 65% / 0.1)` },
+    paused:    { c: AM,  bg: `hsl(45 100% 65% / 0.1)` },
+  };
+  const { c, bg } = map[status] ?? map.skipped;
+  return (
+    <span style={{
+      ...PIXEL, fontSize: "0.48rem", color: c, background: bg,
+      border: `1px solid ${c}44`, borderRadius: 2, padding: "0.1rem 0.35rem",
+      letterSpacing: "0.06em", textTransform: "uppercase" as const,
+    }}>{status}</span>
+  );
+}
+
+// ─── Tab switcher ──────────────────────────────────────────────────────────────
+type Tab = "leaderboard" | "following" | "trades";
+
+// ─── LEADERBOARD TAB ─────────────────────────────────────────────────────────
+function LeaderboardTab() {
   const { toast } = useToast();
-  const [address, setAddress] = useState("");
-  const [label, setLabel]     = useState("");
-  const [copyPct, setCopyPct] = useState("100");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [budget, setBudget] = useState("50");
+  const [mergeResult, setMergeResult] = useState<any[] | null>(null);
+  const [executing, setExecuting] = useState(false);
+
+  const { data: leaders = [], isFetching, refetch } = useQuery<any[]>({
+    queryKey: ["/api/leaderboard"],
+    queryFn: () => apiRequest("GET", "/api/leaderboard").then(r => r.json()),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  });
 
   const addMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/copy/wallets", {
-      address: address.trim(),
-      label: label.trim(),
-      copyPct: parseFloat(copyPct) || 100,
-      isActive: true,
-    }),
+    mutationFn: (addr: string) => apiRequest("POST", "/api/copy/wallets", { address: addr, label: `Top Trader ${addr.slice(0,6)}`, copyPct: 100 }).then(r => r.json()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/copy/wallets"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/copy/stats"] });
-      toast({ title: "Wallet added", description: `Now copying ${shortAddr(address)}` });
-      onClose();
+      toast({ title: "Wallet added to following" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
-  const valid = address.startsWith("0x") && address.length === 42;
-
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    background: "hsl(220 20% 3%)",
-    border: "1px solid hsl(120 100% 55% / 0.3)",
-    borderRadius: "2px",
-    padding: "0.45rem 0.625rem",
-    fontFamily: "var(--font-mono)",
-    fontSize: "0.72rem",
-    color: "hsl(120 100% 55%)",
-    outline: "none",
-    boxSizing: "border-box" as const,
+  const toggleSelect = (addr: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(addr)) next.delete(addr);
+      else next.add(addr);
+      return next;
+    });
+    setMergeResult(null);
   };
 
-  const labelStyle: React.CSSProperties = {
-    fontFamily: "var(--font-pixel)",
-    fontSize: "0.48rem",
-    color: "hsl(120 100% 55% / 0.7)",
-    letterSpacing: "0.1em",
-    display: "block",
-    marginBottom: "0.35rem",
+  const previewMerge = async () => {
+    if (selected.size < 1) return;
+    const wallets = [...selected].map(addr => {
+      const w = leaders.find(l => l.address === addr);
+      return { address: addr, score: w?.score ?? 0.5 };
+    });
+    try {
+      const res = await apiRequest("POST", "/api/leaderboard/merge", {
+        wallets, budget: parseFloat(budget) || 50,
+      });
+      const data = await res.json();
+      setMergeResult(data);
+    } catch (e: any) {
+      toast({ title: "Merge preview failed", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const executeMerge = async () => {
+    if (!mergeResult?.length) return;
+    setExecuting(true);
+    const wallets = [...selected].map(addr => {
+      const w = leaders.find(l => l.address === addr);
+      return { address: addr, score: w?.score ?? 0.5 };
+    });
+    try {
+      const res = await apiRequest("POST", "/api/leaderboard/execute-merge", {
+        wallets, budget: parseFloat(budget) || 50,
+      });
+      const data = await res.json();
+      toast({ title: `Merge executed: ${data.placed} orders placed` });
+      setMergeResult(null);
+      setSelected(new Set());
+    } catch (e: any) {
+      toast({ title: "Execute failed", description: e.message, variant: "destructive" });
+    } finally {
+      setExecuting(false);
+    }
   };
 
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 50,
-      display: "flex", alignItems: "center", justifyContent: "center",
-      background: "rgba(0,0,0,0.85)", backdropFilter: "blur(4px)",
-      padding: "1rem",
-    }}>
-      <div style={{ ...PANEL, width: "100%", maxWidth: "28rem", boxShadow: "0 0 40px hsl(120 100% 55% / 0.15)" }}>
-        <CornerAccents />
-        <div style={PANEL_HDR}>
-          <span style={PANEL_TITLE}>▸ ADD CLONE TARGET</span>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "hsl(0 90% 55%)", fontFamily: "var(--font-pixel)", fontSize: "0.6rem" }}>[ X ]</button>
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      {/* Controls */}
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+        <button style={BTN("ghost")} onClick={() => refetch()}>
+          <RefreshCw size={10} style={{ animation: isFetching ? "spin 1s linear infinite" : "none" }} />
+          REFRESH
+        </button>
+        <span style={{ ...PIXEL, fontSize: "0.5rem", color: G2 }}>
+          {leaders.length} WALLETS RANKED
+        </span>
+        {selected.size > 0 && (<>
+          <span style={{ ...PIXEL, fontSize: "0.5rem", color: AM }}>{selected.size} SELECTED</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+            <label style={{ ...PIXEL, fontSize: "0.48rem", color: G2 }}>BUDGET $</label>
+            <input
+              value={budget} onChange={e => setBudget(e.target.value)}
+              style={{ ...INPUT, width: 60, padding: "0.2rem 0.4rem" }}
+            />
+          </div>
+          <button style={BTN("amber")} onClick={previewMerge}>
+            <GitMerge size={10} /> PREVIEW MERGE
+          </button>
+          {mergeResult && (
+            <button style={BTN("green")} disabled={executing} onClick={executeMerge}>
+              <Target size={10} /> {executing ? "PLACING..." : "EXECUTE MERGE"}
+            </button>
+          )}
+        </>)}
+      </div>
+
+      {/* Leaderboard table */}
+      <div style={{ ...PANEL, overflow: "hidden" }}>
+        <CA />
+        <div style={HDR}>
+          <span style={TITLE}><Trophy size={10} style={{ display: "inline", marginRight: 4 }} /> POLYMARKET TOP TRADERS</span>
+          <span style={{ ...PIXEL, fontSize: "0.48rem", color: G2 }}>RANKED BY SCORE</span>
         </div>
-        <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.875rem" }}>
-          <div>
-            <label style={labelStyle}>WALLET ADDRESS</label>
-            <input
-              placeholder="0x4e2355789ae74089..."
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              style={inputStyle}
-            />
-            {address && !valid && (
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.6rem", color: "hsl(0 90% 55%)", marginTop: "0.25rem" }}>
-                ERR: Must be a valid 0x address (42 chars)
-              </div>
-            )}
-          </div>
-          <div>
-            <label style={labelStyle}>LABEL (OPTIONAL)</label>
-            <input
-              placeholder="e.g. WHALE #1, TOP TRADER"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              style={{ ...inputStyle, fontFamily: "var(--font-pixel)", fontSize: "0.55rem" }}
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>COPY SIZE %</label>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <input
-                type="number" min={1} max={200}
-                value={copyPct}
-                onChange={(e) => setCopyPct(e.target.value)}
-                style={{ ...inputStyle, width: "5rem" }}
-              />
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: "hsl(120 100% 55% / 0.5)" }}>% OF THEIR BET SIZE</span>
+
+        {/* Table header */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "2rem 1fr 5rem 5rem 5rem 5rem 5.5rem 5.5rem 4.5rem",
+          gap: "0 0.5rem",
+          padding: "0.4rem 1rem",
+          borderBottom: BD,
+          background: `hsl(120 100% 65% / 0.04)`,
+        }}>
+          {["#", "WALLET", "PROFIT", "WIN%", "ROI", "TRADES", "VOLUME", "SCORE", "ACTION"].map(h => (
+            <span key={h} style={{ ...PIXEL, fontSize: "0.42rem", color: G2, letterSpacing: "0.06em" }}>{h}</span>
+          ))}
+        </div>
+
+        {/* Rows */}
+        {leaders.length === 0 ? (
+          <div style={{ padding: "2rem", textAlign: "center" }}>
+            <div style={{ ...PIXEL, fontSize: "0.55rem", color: G2 }}>
+              {isFetching ? "SCANNING POLYMARKET TRADES..." : "NO DATA — CLICK REFRESH"}
             </div>
           </div>
-          <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.25rem" }}>
-            <button
-              onClick={() => addMutation.mutate()}
-              disabled={!valid || addMutation.isPending}
+        ) : leaders.map((w: any) => {
+          const isSel = selected.has(w.address);
+          return (
+            <div
+              key={w.address}
+              onClick={() => toggleSelect(w.address)}
               style={{
-                flex: 1,
-                padding: "0.55rem",
-                background: valid && !addMutation.isPending ? "hsl(120 100% 55% / 0.1)" : "transparent",
-                border: "1px solid hsl(120 100% 55%)",
-                borderRadius: "2px",
-                color: "hsl(120 100% 55%)",
-                fontFamily: "var(--font-pixel)",
-                fontSize: "0.5rem",
-                letterSpacing: "0.08em",
-                cursor: valid && !addMutation.isPending ? "pointer" : "not-allowed",
-                opacity: valid && !addMutation.isPending ? 1 : 0.5,
-              }}
-            >
-              {addMutation.isPending ? "[ ADDING... ]" : "[ ADD CLONE TARGET ]"}
-            </button>
-            <button
-              onClick={onClose}
-              style={{
-                padding: "0.55rem 0.75rem",
-                background: "transparent",
-                border: "1px solid hsl(220 20% 30%)",
-                borderRadius: "2px",
-                color: "hsl(220 20% 60%)",
-                fontFamily: "var(--font-pixel)",
-                fontSize: "0.5rem",
+                display: "grid",
+                gridTemplateColumns: "2rem 1fr 5rem 5rem 5rem 5rem 5.5rem 5.5rem 4.5rem",
+                gap: "0 0.5rem",
+                padding: "0.6rem 1rem",
+                borderBottom: `1px solid hsl(120 100% 65% / 0.08)`,
+                background: isSel ? `hsl(120 100% 65% / 0.06)` : "transparent",
                 cursor: "pointer",
+                alignItems: "center",
+                transition: "background 0.12s",
               }}
+              onMouseEnter={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = BG3; }}
+              onMouseLeave={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
             >
-              [ ABORT ]
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Wallet Card ────────────────────────────────────────────────────────────────
-function WalletCard({ wallet, onSync }: { wallet: any; onSync: (id: number) => void }) {
-  const { toast } = useToast();
-
-  const toggleMutation = useMutation({
-    mutationFn: () => apiRequest("PATCH", `/api/copy/wallets/${wallet.id}`, { isActive: !wallet.isActive }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/copy/wallets"] });
-      toast({ title: wallet.isActive ? "Paused" : "Resumed", description: shortAddr(wallet.address) });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: () => apiRequest("DELETE", `/api/copy/wallets/${wallet.id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/copy/wallets"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/copy/stats"] });
-      toast({ title: "Wallet removed" });
-    },
-  });
-
-  const pnlPositive = (wallet.totalPnl || 0) >= 0;
-  const activeColor = wallet.isActive ? "hsl(120 100% 55%)" : "hsl(220 20% 35%)";
-
-  return (
-    <div style={{
-      ...PANEL,
-      borderColor: wallet.isActive ? "hsl(120 100% 55% / 0.3)" : "hsl(220 20% 20%)",
-      opacity: wallet.isActive ? 1 : 0.6,
-      transition: "all 0.2s",
-    }}>
-      <CornerAccents color={activeColor} />
-
-      {/* Header bar */}
-      <div style={{ ...PANEL_HDR, borderBottomColor: `${activeColor}30` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <div style={{
-            width: 8, height: 8, borderRadius: "50%",
-            background: wallet.isActive ? "hsl(120 100% 55%)" : "hsl(220 20% 35%)",
-            boxShadow: wallet.isActive ? "0 0 6px hsl(120 100% 55%)" : "none",
-          }} />
-          <span style={{ ...PIXEL, fontSize: "0.55rem", color: activeColor, letterSpacing: "0.08em" }}>
-            {wallet.label || shortAddr(wallet.address)}
-          </span>
-        </div>
-        <div style={{ display: "flex", gap: "0.25rem" }}>
-          {[
-            { icon: <RefreshCw size={10} />, onClick: () => onSync(wallet.id), title: "Sync", color: "hsl(175 90% 55%)" },
-            { icon: wallet.isActive ? <Pause size={10} /> : <Play size={10} />, onClick: () => toggleMutation.mutate(), title: wallet.isActive ? "Pause" : "Resume", color: "hsl(45 100% 55%)" },
-            { icon: <Trash2 size={10} />, onClick: () => deleteMutation.mutate(), title: "Remove", color: "hsl(0 90% 55%)" },
-          ].map(({ icon, onClick, title, color }, i) => (
-            <button key={i} onClick={onClick} title={title} style={{
-              background: "none", border: "none", cursor: "pointer",
-              color, padding: "0.2rem", opacity: 0.7,
-            }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.7"; }}
-            >
-              {icon}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ padding: "0.75rem", display: "flex", flexDirection: "column", gap: "0.625rem" }}>
-        <div style={{ ...MONO, fontSize: "0.62rem", color: "hsl(120 100% 55% / 0.45)" }}>
-          {shortAddr(wallet.address)}
-        </div>
-
-        {/* Stats grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.375rem" }}>
-          {[
-            { label: "COPIED", value: wallet.totalCopied ?? 0, color: "hsl(120 100% 55%)" },
-            { label: "COPY %", value: `${wallet.copyPct}%`, color: "hsl(45 100% 55%)" },
-            { label: "PNL", value: `${pnlPositive ? "+" : ""}$${(wallet.totalPnl || 0).toFixed(2)}`, color: pnlPositive ? "hsl(120 100% 55%)" : "hsl(0 90% 55%)" },
-          ].map(({ label, value, color }) => (
-            <div key={label} style={{
-              background: "hsl(220 20% 3%)",
-              border: "1px solid hsl(120 100% 55% / 0.1)",
-              borderRadius: "2px",
-              padding: "0.4rem 0.3rem",
-              textAlign: "center",
-            }}>
-              <div style={{ ...PIXEL, fontSize: "0.38rem", color: "hsl(120 100% 55% / 0.45)", letterSpacing: "0.06em", marginBottom: "0.2rem" }}>{label}</div>
-              <div style={{ ...MONO, fontSize: "0.75rem", color }}>{value}</div>
-            </div>
-          ))}
-        </div>
-
-        {wallet.lastSeen && (
-          <div style={{ ...MONO, fontSize: "0.58rem", color: "hsl(120 100% 55% / 0.4)", display: "flex", alignItems: "center", gap: "0.25rem" }}>
-            <Clock size={9} />
-            LAST TRADE: {formatDistanceToNow(new Date(wallet.lastSeen), { addSuffix: true }).toUpperCase()}
-          </div>
-        )}
-
-        <a
-          href={`https://polymarket.com/profile/${wallet.address}`}
-          target="_blank" rel="noopener noreferrer"
-          style={{ ...MONO, fontSize: "0.6rem", color: "hsl(175 90% 55%)", textDecoration: "none", display: "flex", alignItems: "center", gap: "0.25rem" }}
-        >
-          <ExternalLink size={9} />VIEW ON POLYMARKET ↗
-        </a>
-      </div>
-    </div>
-  );
-}
-
-// ── Activity Feed ─────────────────────────────────────────────────────────────
-function ActivityFeed({ trades }: { trades: any[] }) {
-  if (!trades.length) return null;
-  const recent = trades.slice(0, 8);
-  return (
-    <div style={{ ...PANEL, borderColor: "hsl(120 100% 55% / 0.2)" }}>
-      <CornerAccents />
-      <div style={PANEL_HDR}>
-        <span style={PANEL_TITLE}>▸ LIVE ACTIVITY FEED</span>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "hsl(120 100% 55%)", boxShadow: "0 0 5px hsl(120 100% 55%)" }} className="pulse-dot" />
-          <span style={{ ...MONO, fontSize: "0.58rem", color: "hsl(120 100% 55% / 0.5)" }}>POLLS EVERY 60s</span>
-        </div>
-      </div>
-      <div>
-        {recent.map((t: any, i) => (
-          <div key={t.id} style={{
-            padding: "0.6rem 0.875rem",
-            borderBottom: i < recent.length - 1 ? "1px solid hsl(120 100% 55% / 0.06)" : "none",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "0.5rem",
-          }}>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ ...MONO, fontSize: "0.65rem", color: "hsl(120 100% 55%)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {t.market}
-              </div>
-              <div style={{ ...MONO, fontSize: "0.58rem", color: "hsl(120 100% 55% / 0.45)", marginTop: "0.15rem" }}>
-                &gt; {shortAddr(t.walletAddress)} · {t.side} {t.outcome} · ${t.usdcSpent?.toFixed(2)}
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
-              <StatusBadge status={t.status} />
-              {t.createdAt && (
-                <span style={{ ...MONO, fontSize: "0.55rem", color: "hsl(120 100% 55% / 0.3)", whiteSpace: "nowrap" }}>
-                  {formatDistanceToNow(new Date(t.createdAt), { addSuffix: true })}
+              <Medal rank={w.rank} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, overflow: "hidden" }}>
+                <span style={{ ...MONO, fontSize: "0.78rem", color: G, letterSpacing: "0.02em" }}>
+                  {w.displayName}
+                  {w.verified && <span style={{ marginLeft: 4, color: CY, fontSize: "0.6rem" }}>✓</span>}
+                  {isSel && <span style={{ marginLeft: 4, color: AM }}>★</span>}
                 </span>
-              )}
+                <span style={{ ...PIXEL, fontSize: "0.42rem", color: G2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {w.topMarkets?.[0] ?? "—"}
+                </span>
+              </div>
+              <span style={{ ...MONO, fontSize: "0.82rem", color: w.totalProfit >= 0 ? G : RD }}>
+                {fmt$(w.totalProfit)}
+              </span>
+              <span style={{ ...MONO, fontSize: "0.82rem", color: w.winRate >= 55 ? G : w.winRate >= 45 ? AM : RD }}>
+                {w.winRate.toFixed(1)}%
+              </span>
+              <span style={{ ...MONO, fontSize: "0.82rem", color: w.roi >= 0 ? G : RD }}>
+                {fmtPct(w.roi)}
+              </span>
+              <span style={{ ...MONO, fontSize: "0.82rem", color: G }}>{w.totalTrades}</span>
+              <span style={{ ...MONO, fontSize: "0.82rem", color: G2 }}>${w.volume.toFixed(0)}</span>
+              <ScoreBar score={w.score} />
+              <div style={{ display: "flex", gap: "0.3rem" }}>
+                <button
+                  style={{ ...BTN("green"), padding: "0.25rem 0.4rem", fontSize: "0.46rem" }}
+                  onClick={e => { e.stopPropagation(); addMutation.mutate(w.address); }}
+                  title="Follow this wallet"
+                >
+                  <Plus size={8} />
+                </button>
+                <a
+                  href={`https://polymarket.com/profile/${w.address}`}
+                  target="_blank" rel="noopener noreferrer"
+                  onClick={e => e.stopPropagation()}
+                  style={{ ...BTN("ghost"), padding: "0.25rem 0.4rem", fontSize: "0.46rem" }}
+                >
+                  <ExternalLink size={8} />
+                </a>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
+      {/* Merge preview */}
+      {mergeResult && mergeResult.length > 0 && (
+        <div style={{ ...PANEL }}>
+          <CA color={AM} />
+          <div style={{ ...HDR, borderBottomColor: `${AM}44` }}>
+            <span style={{ ...TITLE, color: AM }}><GitMerge size={10} style={{ display: "inline", marginRight: 4 }} /> MERGED POSITIONS PREVIEW</span>
+            <span style={{ ...PIXEL, fontSize: "0.48rem", color: G2 }}>BUDGET ${budget}</span>
+          </div>
+          {mergeResult.map((pos: any, i: number) => (
+            <div key={i} style={{
+              padding: "0.6rem 1rem",
+              borderBottom: `1px solid hsl(45 100% 65% / 0.1)`,
+              display: "grid",
+              gridTemplateColumns: "1fr 4rem 4rem 5rem 5rem",
+              gap: "0 0.5rem", alignItems: "center",
+            }}>
+              <span style={{ ...MONO, fontSize: "0.75rem", color: G, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {pos.market}
+              </span>
+              <span style={{ ...PIXEL, fontSize: "0.52rem", color: pos.outcome === "Yes" || pos.outcome === "YES" ? G : RD }}>
+                {pos.outcome}
+              </span>
+              <span style={{ ...PIXEL, fontSize: "0.52rem", color: G2 }}>
+                {pos.walletCount} wallets
+              </span>
+              <span style={{ ...MONO, fontSize: "0.78rem", color: AM }}>
+                @{pos.avgPrice.toFixed(3)}
+              </span>
+              <span style={{ ...MONO, fontSize: "0.78rem", color: G }}>
+                ${pos.recommendedSize.toFixed(2)}
+              </span>
+            </div>
+          ))}
+          {mergeResult.length === 0 && (
+            <div style={{ padding: "1.5rem", textAlign: "center" }}>
+              <span style={{ ...PIXEL, fontSize: "0.52rem", color: G2 }}>NO CONSENSUS POSITIONS FOUND</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-export default function CopyTrade() {
+// ─── FOLLOWING TAB ───────────────────────────────────────────────────────────
+function FollowingTab() {
   const { toast } = useToast();
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [activeTab, setActiveTab] = useState<"wallets" | "trades">("wallets");
+  const [showAdd, setShowAdd] = useState(false);
+  const [addAddr, setAddAddr] = useState("");
+  const [addLabel, setAddLabel] = useState("");
+  const [addPct, setAddPct] = useState("100");
 
-  const { data: wallets = [], isLoading: walletsLoading } = useQuery({ queryKey: ["/api/copy/wallets"], refetchInterval: 60000, staleTime: 30000 });
-  const { data: stats } = useQuery({ queryKey: ["/api/copy/stats"], refetchInterval: 60000, staleTime: 30000 });
-  const { data: copyTrades = [], isLoading: tradesLoading } = useQuery({
-    queryKey: ["/api/copy/trades"],
-    queryFn: () => apiRequest("GET", "/api/copy/trades?limit=100").then((r) => r.json()),
-    refetchInterval: 20000,
-    staleTime: 15000,
+  const { data: wallets = [], refetch } = useQuery<any[]>({
+    queryKey: ["/api/copy/wallets"],
+    queryFn: () => apiRequest("GET", "/api/copy/wallets").then(r => r.json()),
+    staleTime: 30000, refetchInterval: 30000,
   });
 
-  const syncMutation = useMutation({
-    mutationFn: (id: number) => apiRequest("POST", `/api/copy/wallets/${id}/sync`),
-    onSuccess: (data: any) => {
+  const { data: stats } = useQuery<any>({
+    queryKey: ["/api/copy/stats"],
+    queryFn: () => apiRequest("GET", "/api/copy/stats").then(r => r.json()),
+    staleTime: 30000,
+  });
+
+  const addMut = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/copy/wallets", {
+      address: addAddr, label: addLabel || `Wallet ${addAddr.slice(0,6)}`,
+      copyPct: parseFloat(addPct) || 100,
+    }).then(r => r.json()),
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/copy/wallets"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/copy/trades"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/copy/stats"] });
-      toast({ title: "Synced", description: `${data.copied ?? 0} new trade(s) copied` });
+      setShowAdd(false); setAddAddr(""); setAddLabel(""); setAddPct("100");
+      toast({ title: "Wallet added" });
     },
-    onError: (e: any) => toast({ title: "Sync failed", description: e.message, variant: "destructive" }),
   });
 
-  const walletList: any[] = (wallets as any) || [];
-  const tradeList: any[] = (copyTrades as any) || [];
-  const s: any = stats || {};
+  const toggleMut = useMutation({
+    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) =>
+      apiRequest("PATCH", `/api/copy/wallets/${id}`, { isActive }).then(r => r.json()),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/copy/wallets"] }),
+  });
 
-  const filledTrades = tradeList.filter((t) => t.status === "filled");
-  const successRate = tradeList.length > 0 ? ((filledTrades.length / tradeList.length) * 100).toFixed(1) : "—";
+  const deleteMut = useMutation({
+    mutationFn: (id: number) => apiRequest("DELETE", `/api/copy/wallets/${id}`).then(r => r.json()),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/copy/wallets"] }),
+  });
 
-  const statCards = [
-    { label: "WALLETS", value: s.totalWallets ?? 0, color: "hsl(120 100% 55%)" },
-    { label: "ACTIVE", value: s.activeWallets ?? 0, color: "hsl(175 90% 55%)" },
-    { label: "COPIED", value: s.filled ?? 0, color: "hsl(120 100% 55%)" },
-    { label: "SUCCESS", value: `${successRate}%`, color: "hsl(45 100% 55%)" },
-  ];
+  const syncMut = useMutation({
+    mutationFn: (id: number) => apiRequest("POST", `/api/copy/wallets/${id}/sync`).then(r => r.json()),
+    onSuccess: (d: any) => toast({ title: `Synced: ${d.copied} trade(s) copied` }),
+  });
 
+  // Stats bar
   return (
-    <div style={{ padding: "1.25rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-      {showAddForm && <AddWalletForm onClose={() => setShowAddForm(false)} />}
-
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", borderBottom: "1px solid hsl(120 100% 55% / 0.15)", paddingBottom: "0.75rem" }}>
-        <div>
-          <div style={{ fontFamily: "var(--font-pixel)", fontSize: "0.8rem", color: "hsl(120 100% 55%)", letterSpacing: "0.1em" }}>
-            ══ CLONE UNIT ══
-          </div>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.62rem", color: "hsl(120 100% 55% / 0.45)", marginTop: "0.25rem" }}>
-            MIRROR POLYMARKET WHALE WALLETS IN REAL-TIME
-          </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      {/* Stats */}
+      {stats && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "0.5rem" }}>
+          {[
+            { label: "ACTIVE", value: stats.activeWallets, color: G },
+            { label: "TOTAL COPIED", value: stats.totalCopied, color: CY },
+            { label: "FILLED", value: stats.filled, color: G },
+            { label: "FAILED", value: stats.failed, color: RD },
+            { label: "TOTAL P&L", value: fmt$(stats.totalPnl), color: stats.totalPnl >= 0 ? G : RD },
+          ].map(s => (
+            <div key={s.label} style={{ ...PANEL, padding: "0.6rem 0.75rem", textAlign: "center" }}>
+              <div style={{ ...MONO, fontSize: "1.1rem", color: s.color, fontWeight: "bold" }}>{s.value}</div>
+              <div style={{ ...PIXEL, fontSize: "0.42rem", color: G2, marginTop: 3 }}>{s.label}</div>
+            </div>
+          ))}
         </div>
-        <button
-          onClick={() => setShowAddForm(true)}
-          style={{
-            padding: "0.45rem 0.75rem",
-            background: "hsl(120 100% 55% / 0.1)",
-            border: "1px solid hsl(120 100% 55%)",
-            borderRadius: "2px",
-            color: "hsl(120 100% 55%)",
-            fontFamily: "var(--font-pixel)",
-            fontSize: "0.48rem",
-            letterSpacing: "0.08em",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "0.3rem",
-          }}
-        >
-          <Plus size={10} />[ ADD TARGET ]
+      )}
+
+      {/* Add wallet */}
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+        <button style={BTN("green")} onClick={() => setShowAdd(v => !v)}>
+          <Plus size={10} /> ADD WALLET
+        </button>
+        <button style={BTN("ghost")} onClick={() => refetch()}>
+          <RefreshCw size={10} /> REFRESH
         </button>
       </div>
 
-      {/* Stats bar */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "0.625rem" }}>
-        {statCards.map(({ label, value, color }) => (
-          <div key={label} style={{ ...PANEL, borderColor: `${color}30` }}>
-            <CornerAccents color={color} />
-            <div style={{ padding: "0.75rem 1rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontFamily: "var(--font-pixel)", fontSize: "0.45rem", color: `${color}99`, letterSpacing: "0.08em" }}>{label}</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "1.2rem", color }}>{value}</span>
+      {showAdd && (
+        <div style={{ ...PANEL, padding: "1rem" }}>
+          <CA />
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: "0.5rem", alignItems: "flex-end" }}>
+            <div>
+              <label style={LABEL}>WALLET ADDRESS</label>
+              <input style={INPUT} placeholder="0x…" value={addAddr} onChange={e => setAddAddr(e.target.value)} />
+            </div>
+            <div>
+              <label style={LABEL}>LABEL (optional)</label>
+              <input style={INPUT} placeholder="Whale #1" value={addLabel} onChange={e => setAddLabel(e.target.value)} />
+            </div>
+            <div>
+              <label style={LABEL}>COPY %</label>
+              <input style={INPUT} type="number" min={1} max={200} value={addPct} onChange={e => setAddPct(e.target.value)} />
+            </div>
+            <div style={{ display: "flex", gap: "0.3rem" }}>
+              <button style={BTN("green")} onClick={() => addMut.mutate()}>ADD</button>
+              <button style={BTN("ghost")} onClick={() => setShowAdd(false)}>✕</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Wallet cards */}
+      {wallets.length === 0 ? (
+        <div style={{ ...PANEL, padding: "2.5rem", textAlign: "center" }}>
+          <div style={{ ...PIXEL, fontSize: "0.6rem", color: G2, marginBottom: "0.75rem" }}>
+            NO WALLETS FOLLOWED
+          </div>
+          <div style={{ ...MONO, fontSize: "0.8rem", color: G2 }}>
+            Browse the leaderboard and click + to follow top traders
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "0.75rem" }}>
+          {wallets.map((w: any) => (
+            <div key={w.id} style={{ ...PANEL, padding: "1rem" }}>
+              <CA color={w.isActive ? G : G2} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "0.6rem" }}>
+                <div>
+                  <div style={{ ...PIXEL, fontSize: "0.55rem", color: G, marginBottom: 2 }}>
+                    {w.label || shortAddr(w.address)}
+                  </div>
+                  <div style={{ ...MONO, fontSize: "0.72rem", color: G2 }}>{shortAddr(w.address)}</div>
+                </div>
+                <Badge status={w.isActive ? "active" : "paused"} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem", marginBottom: "0.8rem" }}>
+                <div>
+                  <div style={{ ...PIXEL, fontSize: "0.42rem", color: G2 }}>COPY PCT</div>
+                  <div style={{ ...MONO, fontSize: "0.9rem", color: AM }}>{w.copyPct}%</div>
+                </div>
+                <div>
+                  <div style={{ ...PIXEL, fontSize: "0.42rem", color: G2 }}>TRADES COPIED</div>
+                  <div style={{ ...MONO, fontSize: "0.9rem", color: CY }}>{w.totalCopied}</div>
+                </div>
+                <div>
+                  <div style={{ ...PIXEL, fontSize: "0.42rem", color: G2 }}>TOTAL PNL</div>
+                  <div style={{ ...MONO, fontSize: "0.9rem", color: w.totalPnl >= 0 ? G : RD }}>
+                    {fmt$(w.totalPnl)}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ ...PIXEL, fontSize: "0.42rem", color: G2 }}>LAST SEEN</div>
+                  <div style={{ ...MONO, fontSize: "0.72rem", color: G2 }}>
+                    {w.lastSeen ? formatDistanceToNow(new Date(w.lastSeen), { addSuffix: true }) : "Never"}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "0.3rem", flexWrap: "wrap" }}>
+                <button style={BTN(w.isActive ? "amber" : "green")} onClick={() => toggleMut.mutate({ id: w.id, isActive: !w.isActive })}>
+                  {w.isActive ? <><Pause size={8} /> PAUSE</> : <><Play size={8} /> RESUME</>}
+                </button>
+                <button style={BTN("ghost")} onClick={() => syncMut.mutate(w.id)}>
+                  <Zap size={8} /> SYNC
+                </button>
+                <a href={`https://polymarket.com/profile/${w.address}`} target="_blank" rel="noopener noreferrer" style={BTN("ghost")}>
+                  <ExternalLink size={8} /> PROFILE
+                </a>
+                <button style={{ ...BTN("red"), marginLeft: "auto" }} onClick={() => deleteMut.mutate(w.id)}>
+                  <Trash2 size={8} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── TRADES TAB ──────────────────────────────────────────────────────────────
+function TradesTab() {
+  const { data: trades = [] } = useQuery<any[]>({
+    queryKey: ["/api/copy/trades"],
+    queryFn: () => apiRequest("GET", "/api/copy/trades?limit=100").then(r => r.json()),
+    staleTime: 30000, refetchInterval: 30000,
+  });
+
+  return (
+    <div style={{ ...PANEL }}>
+      <CA />
+      <div style={HDR}>
+        <span style={TITLE}><Target size={10} style={{ display: "inline", marginRight: 4 }} /> COPY TRADES</span>
+        <span style={{ ...PIXEL, fontSize: "0.48rem", color: G2 }}>{trades.length} TOTAL</span>
+      </div>
+
+      {/* Col headers */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 4.5rem 4.5rem 4.5rem 5rem 5rem 5rem",
+        gap: "0 0.5rem", padding: "0.4rem 1rem", borderBottom: BD,
+        background: `hsl(120 100% 65% / 0.04)`,
+      }}>
+        {["MARKET", "WALLET", "SIDE", "OUTCOME", "SIZE", "PRICE", "STATUS"].map(h => (
+          <span key={h} style={{ ...PIXEL, fontSize: "0.42rem", color: G2 }}>{h}</span>
         ))}
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: "0.5rem" }}>
-        {(["wallets", "trades"] as const).map((tab) => (
+      {trades.length === 0 ? (
+        <div style={{ padding: "2rem", textAlign: "center" }}>
+          <span style={{ ...PIXEL, fontSize: "0.55rem", color: G2 }}>NO COPY TRADES YET</span>
+        </div>
+      ) : trades.map((t: any) => (
+        <div key={t.id} style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 4.5rem 4.5rem 4.5rem 5rem 5rem 5rem",
+          gap: "0 0.5rem", padding: "0.55rem 1rem",
+          borderBottom: `1px solid hsl(120 100% 65% / 0.06)`,
+          alignItems: "center",
+        }}>
+          <span style={{ ...MONO, fontSize: "0.72rem", color: G, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {t.market}
+          </span>
+          <span style={{ ...MONO, fontSize: "0.7rem", color: G2 }}>{shortAddr(t.walletAddress)}</span>
+          <span style={{ ...PIXEL, fontSize: "0.5rem", color: t.side === "BUY" ? G : RD }}>{t.side}</span>
+          <span style={{ ...PIXEL, fontSize: "0.5rem", color: t.outcome === "YES" || t.outcome === "Yes" ? G : RD }}>
+            {t.outcome}
+          </span>
+          <span style={{ ...MONO, fontSize: "0.78rem", color: G }}>{t.size.toFixed(2)}</span>
+          <span style={{ ...MONO, fontSize: "0.78rem", color: AM }}>@{t.price.toFixed(3)}</span>
+          <Badge status={t.status} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── MAIN PAGE ───────────────────────────────────────────────────────────────
+export default function CopyTrade() {
+  const [tab, setTab] = useState<Tab>("leaderboard");
+
+  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: "leaderboard", label: "LEADERBOARD", icon: <Trophy size={10} /> },
+    { id: "following",   label: "FOLLOWING",   icon: <Users size={10} /> },
+    { id: "trades",      label: "COPY TRADES", icon: <TrendingUp size={10} /> },
+  ];
+
+  return (
+    <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "1rem", minHeight: "100vh" }}>
+      {/* Page header */}
+      <div style={{ ...PANEL, padding: "0.875rem 1rem" }}>
+        <CA />
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <Wallet size={20} color={G} />
+          <div>
+            <div style={{ ...PIXEL, fontSize: "0.65rem", color: G, letterSpacing: "0.1em" }}>
+              COPY TRADING ENGINE
+            </div>
+            <div style={{ ...MONO, fontSize: "0.75rem", color: G2, marginTop: 3 }}>
+              Follow top Polymarket wallets · Copy single or merge multiple
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div style={{ display: "flex", gap: "0.25rem", borderBottom: BD, paddingBottom: "0.5rem" }}>
+        {tabs.map(t => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
+            key={t.id}
             style={{
-              padding: "0.4rem 0.75rem",
-              background: activeTab === tab ? "hsl(120 100% 55% / 0.1)" : "transparent",
-              border: activeTab === tab ? "1px solid hsl(120 100% 55%)" : "1px solid hsl(120 100% 55% / 0.2)",
-              borderRadius: "2px",
-              color: activeTab === tab ? "hsl(120 100% 55%)" : "hsl(120 100% 55% / 0.45)",
-              fontFamily: "var(--font-pixel)",
-              fontSize: "0.48rem",
-              letterSpacing: "0.08em",
-              cursor: "pointer",
-              textTransform: "uppercase" as const,
+              ...PIXEL, fontSize: "0.52rem", letterSpacing: "0.08em",
+              padding: "0.45rem 0.875rem", borderRadius: 2, cursor: "pointer",
+              display: "flex", alignItems: "center", gap: "0.35rem",
+              background: tab === t.id ? `hsl(120 100% 65% / 0.12)` : "transparent",
+              border: tab === t.id ? `1px solid ${G}` : `1px solid transparent`,
+              color: tab === t.id ? G : G2,
+              transition: "all 0.15s",
             }}
+            onClick={() => setTab(t.id)}
           >
-            {tab === "wallets" ? `WALLETS (${walletList.length})` : `COPY TRADES (${tradeList.length})`}
+            {t.icon}{t.label}
           </button>
         ))}
       </div>
 
-      {/* Wallets tab */}
-      {activeTab === "wallets" && (
-        <>
-          {walletsLoading ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(16rem, 1fr))", gap: "0.75rem" }}>
-              {[...Array(3)].map((_, i) => (
-                <div key={i} style={{ ...PANEL, height: "11rem", opacity: 0.4 }}>
-                  <div style={{ ...PANEL_HDR }}><span style={PANEL_TITLE}>LOADING...</span></div>
-                </div>
-              ))}
-            </div>
-          ) : walletList.length === 0 ? (
-            <div style={{ ...PANEL, textAlign: "center" }}>
-              <CornerAccents color="hsl(120 100% 55% / 0.3)" />
-              <div style={{ padding: "3rem 1.5rem", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem" }}>
-                <div style={{ fontFamily: "var(--font-pixel)", fontSize: "1.5rem", color: "hsl(120 100% 55% / 0.2)" }}>◈</div>
-                <div style={{ fontFamily: "var(--font-pixel)", fontSize: "0.55rem", color: "hsl(120 100% 55% / 0.5)", letterSpacing: "0.08em" }}>NO CLONE TARGETS REGISTERED</div>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.62rem", color: "hsl(120 100% 55% / 0.35)" }}>Add a Polymarket wallet to start copying trades</div>
-                <button
-                  onClick={() => setShowAddForm(true)}
-                  style={{
-                    padding: "0.5rem 1rem",
-                    background: "hsl(120 100% 55% / 0.1)",
-                    border: "1px solid hsl(120 100% 55%)",
-                    borderRadius: "2px",
-                    color: "hsl(120 100% 55%)",
-                    fontFamily: "var(--font-pixel)",
-                    fontSize: "0.48rem",
-                    letterSpacing: "0.08em",
-                    cursor: "pointer",
-                    marginTop: "0.5rem",
-                  }}
-                >
-                  [ ADD FIRST TARGET ]
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(16rem, 1fr))", gap: "0.75rem" }}>
-              {walletList.map((w: any) => (
-                <WalletCard key={w.id} wallet={w} onSync={(id) => syncMutation.mutate(id)} />
-              ))}
-            </div>
-          )}
-
-          {/* How it works */}
-          <div style={{ ...PANEL, borderColor: "hsl(175 90% 55% / 0.2)" }}>
-            <CornerAccents color="hsl(175 90% 55%)" />
-            <div style={{ ...PANEL_HDR, borderBottomColor: "hsl(175 90% 55% / 0.15)" }}>
-              <span style={{ ...PANEL_TITLE, color: "hsl(175 90% 55%)" }}>▸ CLONE PROTOCOL // HOW IT WORKS</span>
-            </div>
-            <div style={{ padding: "0.875rem", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(10rem, 1fr))", gap: "0.75rem" }}>
-              {[
-                { step: "01", title: "ADD TARGET", desc: "Paste any Polymarket wallet address. Set % of their bet size to mirror." },
-                { step: "02", title: "AUTO-COPY", desc: "Engine polls activity every 60s. New trades placed instantly using your Poly key." },
-                { step: "03", title: "TRACK PNL", desc: "All copied trades appear in Trades tab with fill price, status, and PNL." },
-              ].map(({ step, title, desc }) => (
-                <div key={step}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: "0.4rem" }}>
-                    <span style={{ fontFamily: "var(--font-pixel)", fontSize: "0.55rem", color: "hsl(175 90% 55%)" }}>[{step}]</span>
-                    <span style={{ fontFamily: "var(--font-pixel)", fontSize: "0.52rem", color: "hsl(120 100% 55%)", letterSpacing: "0.06em" }}>{title}</span>
-                  </div>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.62rem", color: "hsl(120 100% 55% / 0.45)", lineHeight: 1.6 }}>{desc}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{
-              margin: "0 0.875rem 0.875rem",
-              padding: "0.5rem 0.75rem",
-              background: "hsl(220 20% 3%)",
-              border: "1px solid hsl(120 100% 55% / 0.15)",
-              borderRadius: "2px",
-              fontFamily: "var(--font-mono)",
-              fontSize: "0.62rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              flexWrap: "wrap" as const,
-            }}>
-              <span style={{ color: "hsl(45 100% 55%)" }}>&gt; CONNECTED WALLET:</span>
-              <span style={{ color: "hsl(120 100% 55%)" }}>0x4e2355…e6093</span>
-              <span style={{ color: "hsl(120 100% 55% / 0.3)" }}>·</span>
-              <span style={{ color: "hsl(175 90% 55%)" }}>PRIVATE KEY CONFIGURED ✓</span>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Trades tab */}
-      {activeTab === "trades" && (
-        <>
-          <ActivityFeed trades={tradeList} />
-
-          <div style={PANEL}>
-            <CornerAccents />
-            <div style={PANEL_HDR}>
-              <span style={PANEL_TITLE}>▸ ALL COPIED TRADES</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.58rem", color: "hsl(120 100% 55% / 0.45)" }}>{tradeList.length} RECORDS</span>
-            </div>
-
-            {tradesLoading ? (
-              <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} style={{ height: "2.5rem", background: "hsl(120 100% 55% / 0.04)", borderRadius: "2px" }} />
-                ))}
-              </div>
-            ) : tradeList.length === 0 ? (
-              <div style={{ padding: "2rem", textAlign: "center", fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: "hsl(120 100% 55% / 0.4)" }}>
-                &gt; NO COPY TRADES YET. ADD A WALLET AND THE ENGINE WILL START COPYING.
-              </div>
-            ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ borderBottom: "1px solid hsl(120 100% 55% / 0.15)", background: "hsl(120 100% 55% / 0.03)" }}>
-                      {["WALLET", "MARKET", "SIDE", "OUTCOME", "SIZE", "PRICE", "USDC", "STATUS", "ORDER ID", "TIME"].map((h) => (
-                        <th key={h} style={{
-                          padding: "0.5rem 0.75rem",
-                          textAlign: "left",
-                          fontFamily: "var(--font-pixel)",
-                          fontSize: "0.42rem",
-                          color: "hsl(120 100% 55% / 0.5)",
-                          letterSpacing: "0.06em",
-                          whiteSpace: "nowrap" as const,
-                          fontWeight: "normal",
-                        }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tradeList.map((t: any) => (
-                      <tr key={t.id} style={{ borderBottom: "1px solid hsl(120 100% 55% / 0.06)" }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "hsl(120 100% 55% / 0.03)"; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "transparent"; }}
-                      >
-                        <td style={{ padding: "0.6rem 0.75rem", fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: "hsl(120 100% 55% / 0.5)", whiteSpace: "nowrap" as const }}>
-                          {shortAddr(t.walletAddress)}
-                        </td>
-                        <td style={{ padding: "0.6rem 0.75rem", maxWidth: "10rem" }}>
-                          <div style={{ fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: "hsl(120 100% 55%)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }} title={t.market}>
-                            {t.market}
-                          </div>
-                        </td>
-                        <td style={{ padding: "0.6rem 0.75rem" }}>
-                          <span style={{
-                            padding: "0.1rem 0.35rem",
-                            border: `1px solid ${t.side === "BUY" ? "hsl(120 100% 55% / 0.4)" : "hsl(0 90% 55% / 0.4)"}`,
-                            borderRadius: "2px",
-                            color: t.side === "BUY" ? "hsl(120 100% 55%)" : "hsl(0 90% 55%)",
-                            fontFamily: "var(--font-pixel)",
-                            fontSize: "0.45rem",
-                            letterSpacing: "0.06em",
-                          }}>{t.side}</span>
-                        </td>
-                        <td style={{ padding: "0.6rem 0.75rem" }}>
-                          <span style={{
-                            padding: "0.1rem 0.35rem",
-                            border: `1px solid ${t.outcome === "Yes" ? "hsl(120 100% 55% / 0.4)" : "hsl(0 90% 55% / 0.4)"}`,
-                            borderRadius: "2px",
-                            color: t.outcome === "Yes" ? "hsl(120 100% 55%)" : "hsl(0 90% 55%)",
-                            fontFamily: "var(--font-pixel)",
-                            fontSize: "0.45rem",
-                            letterSpacing: "0.06em",
-                          }}>{t.outcome}</span>
-                        </td>
-                        <td style={{ padding: "0.6rem 0.75rem", fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: "hsl(120 100% 55%)" }}>
-                          {t.size?.toFixed(2)}
-                        </td>
-                        <td style={{ padding: "0.6rem 0.75rem", fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: "hsl(120 100% 55% / 0.6)" }}>
-                          {(t.price * 100).toFixed(1)}¢
-                        </td>
-                        <td style={{ padding: "0.6rem 0.75rem", fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: "hsl(45 100% 55%)" }}>
-                          ${t.usdcSpent?.toFixed(2)}
-                        </td>
-                        <td style={{ padding: "0.6rem 0.75rem" }}>
-                          <StatusBadge status={t.status} />
-                        </td>
-                        <td style={{ padding: "0.6rem 0.75rem" }}>
-                          {t.polyOrderId ? (
-                            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.6rem", color: "hsl(120 100% 55% / 0.45)" }} title={t.polyOrderId}>
-                              {t.polyOrderId.slice(0, 8)}…
-                            </span>
-                          ) : <span style={{ color: "hsl(120 100% 55% / 0.2)" }}>—</span>}
-                        </td>
-                        <td style={{ padding: "0.6rem 0.75rem", fontFamily: "var(--font-mono)", fontSize: "0.6rem", color: "hsl(120 100% 55% / 0.4)", whiteSpace: "nowrap" as const }}>
-                          {t.createdAt ? formatDistanceToNow(new Date(t.createdAt), { addSuffix: true }) : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </>
-      )}
+      {/* Tab content */}
+      {tab === "leaderboard" && <LeaderboardTab />}
+      {tab === "following"   && <FollowingTab />}
+      {tab === "trades"      && <TradesTab />}
     </div>
   );
 }

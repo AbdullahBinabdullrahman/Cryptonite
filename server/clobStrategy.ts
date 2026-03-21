@@ -29,10 +29,42 @@ const MAX_BET     = 100.0;  // $100 maximum per trade
 const TICK_MS     = 10000;  // 10 seconds
 const MAX_PER_DAY = 200;    // max 200 CLOB trades/day (was 1000 — reduces fee erosion)
 const MAX_PER_TICK = 2;     // max 2 bets per tick
+const STALE_POSITION_MS = 24 * 60 * 60 * 1000; // 24 hours — positions older than this are auto-resolved
 
 // ─── Order book imbalance cache ───────────────────────────────────────────────
 // Stores latest bid/ask imbalance per tokenId: >0 = buy pressure, <0 = sell pressure
 const obImbalanceCache: Map<string, { imbalance: number; ts: number }> = new Map();
+
+// ─── Per-session deduplication ────────────────────────────────────────────────
+// Track marketIds+side already bet in this server session to prevent repeat bets.
+// Reset on server restart (intentional — new session = fresh scan).
+// Format: "<conditionId>:<YES|NO>"
+const sessionBets: Set<string> = new Set();
+
+// Per-day dedup: reset at midnight UTC
+let dedupDayKey = new Date().toISOString().slice(0, 10); // "2026-03-21"
+const dailyBets: Set<string> = new Set(); // "<conditionId>:<YES|NO>"
+
+function getDailyBetKey(conditionId: string, side: string): string {
+  // Reset if day rolled over
+  const todayKey = new Date().toISOString().slice(0, 10);
+  if (todayKey !== dedupDayKey) {
+    dedupDayKey = todayKey;
+    dailyBets.clear();
+    console.log("[CLOBv2] Daily dedup set reset for new day:", todayKey);
+  }
+  return `${conditionId}:${side}`;
+}
+
+function hasAlreadyBetToday(conditionId: string, side: string): boolean {
+  return dailyBets.has(getDailyBetKey(conditionId, side));
+}
+
+function markBetToday(conditionId: string, side: string): void {
+  const key = getDailyBetKey(conditionId, side);
+  dailyBets.add(key);
+  sessionBets.add(key); // also mark in session set
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -376,7 +408,7 @@ async function findEdgeOpps(markets: ClobMarket[], bayesMap: Record<string, Baye
 
     // ── YES side: adjusted model says UP more than market thinks
     const evYes = calcEV(adjYesProb, mkt.yesPrice);
-    if (evYes > MIN_EV && mkt.timeRemaining > 60) {
+    if (evYes > MIN_EV && mkt.timeRemaining > 60 && !hasAlreadyBetToday(mkt.conditionId, "YES")) {
       const rPrice = reservationPrice(mkt.yesPrice, variance, mkt.timeRemaining);
       const kf     = kellyFraction(adjYesProb, rPrice);
       if (kf > 0) {
@@ -396,7 +428,7 @@ async function findEdgeOpps(markets: ClobMarket[], bayesMap: Record<string, Baye
 
     // ── NO side: adjusted model says DOWN, market underprices NO
     const evNo = calcEV(adjNoProb, mkt.noPrice);
-    if (evNo > MIN_EV && mkt.timeRemaining > 60) {
+    if (evNo > MIN_EV && mkt.timeRemaining > 60 && !hasAlreadyBetToday(mkt.conditionId, "NO")) {
       const rPrice = reservationPrice(mkt.noPrice, variance, mkt.timeRemaining);
       const kf     = kellyFraction(adjNoProb, rPrice);
       if (kf > 0) {
@@ -466,6 +498,9 @@ async function placeBet(opp: EdgeOpp, balance: number, settings: any): Promise<b
   const status = result.status === "simulated" ? "clob:simulated" : "clob:placed";
   await storage.updateTradeAlpacaOrder(trade.id, result.orderId ?? `clob-${Date.now()}`, status);
 
+  // Mark this market+side as bet today so we don't repeat it
+  markBetToday(opp.market.conditionId, opp.side);
+
   console.log(
     `[CLOBv2] ${opp.market.asset} ${opp.side} | ` +
     `prior=${(opp.prior*100).toFixed(1)}% → post=${(opp.posterior*100).toFixed(1)}% | ` +
@@ -473,6 +508,41 @@ async function placeBet(opp: EdgeOpp, balance: number, settings: any): Promise<b
     `$${opp.betSize.toFixed(2)} @ ${opp.limitPrice.toFixed(3)} | ${status}`
   );
   return result.ok;
+}
+
+
+// ─── Stale position cleanup ───────────────────────────────────────────────────
+/**
+ * Polymarket markets resolve within their end window (typically 5-30 min).
+ * Our DB may have lingering "open" CLOB entries never updated.
+ * Auto-resolve any CLOB trade still "open" after 24h as "lost" (conservative).
+ */
+let lastStaleCheck = 0;
+
+async function clearStalePositions(): Promise<void> {
+  const now = Date.now();
+  if (now - lastStaleCheck < 60 * 60 * 1000) return; // max once per hour
+  lastStaleCheck = now;
+  try {
+    const openTrades = await storage.getOpenTrades();
+    let cleared = 0;
+    for (const trade of openTrades) {
+      const isClobTrade =
+        trade.alpacaOrderStatus?.startsWith("clob") ||
+        (!trade.alpacaOrderStatus && (trade.marketId?.length ?? 0) > 10);
+      if (!isClobTrade) continue;
+      const ageMs = now - new Date(trade.createdAt).getTime();
+      if (ageMs > STALE_POSITION_MS) {
+        await storage.resolveTrade(trade.id, "lost", -trade.betSize);
+        cleared++;
+      }
+    }
+    if (cleared > 0) {
+      console.log(`[CLOBv2] Auto-resolved ${cleared} stale position(s) older than 24h`);
+    }
+  } catch (err) {
+    console.warn("[CLOBv2] clearStalePositions error:", err);
+  }
 }
 
 // ─── Main loop ────────────────────────────────────────────────────────────────
@@ -513,6 +583,9 @@ export function startClobStrategy() {
       if (!opps.length) return;
 
       console.log(`[CLOBv2] ${opps.length} edge opps | top EV=${(opps[0].evNet*100).toFixed(2)}%`);
+
+      // 3.5 Clear stale positions older than 24h (runs at most once/hour)
+      await clearStalePositions();
 
       // 4. Place top opportunities (max MAX_PER_TICK per tick)
       const limit = Math.min(MAX_PER_TICK, opps.length, MAX_PER_DAY - todayCount);

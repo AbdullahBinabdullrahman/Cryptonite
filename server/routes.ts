@@ -16,6 +16,7 @@ import {
 import { z } from "zod";
 import { getMLStats } from "./mlEngine";
 import { insertCopiedWalletSchema } from "@shared/schema";
+import { getTopWallets, getWalletProfile, getMergedPositions } from "./walletLeaderboard";
 
 // Start engines on server boot
 startBotEngine();
@@ -796,6 +797,89 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({ assets: state, timestamp: Date.now() });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── Wallet Leaderboard ──────────────────────────────────────────────────────
+
+  // Top wallets ranked by score (PnL, win rate, ROI, diversity)
+  app.get("/api/leaderboard", async (req, res) => {
+    try {
+      const refresh = req.query.refresh === "true";
+      const leaders = await getTopWallets(refresh);
+      res.json(leaders);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Deep profile for a specific wallet
+  app.get("/api/leaderboard/profile/:address", async (req, res) => {
+    try {
+      const profile = await getWalletProfile(req.params.address);
+      res.json(profile);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Smart merge: blend positions from multiple wallets
+  app.post("/api/leaderboard/merge", async (req, res) => {
+    try {
+      const { wallets, budget = 100 } = req.body as { wallets: { address: string; score: number }[]; budget?: number };
+      if (!Array.isArray(wallets) || !wallets.length) {
+        return res.status(400).json({ error: "wallets array required" });
+      }
+      const addresses = wallets.map(w => w.address);
+      const scores: Record<string, number> = {};
+      wallets.forEach(w => { scores[w.address] = w.score; });
+      const positions = await getMergedPositions(addresses, scores, 10, budget);
+      res.json(positions);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Execute a merge-copy: place all merged positions using user's POLY wallet
+  app.post("/api/leaderboard/execute-merge", requireAuth, async (req, res) => {
+    try {
+      const { wallets, budget = 100 } = req.body as { wallets: { address: string; score: number }[]; budget?: number };
+      if (!Array.isArray(wallets) || !wallets.length) {
+        return res.status(400).json({ error: "wallets array required" });
+      }
+      const addresses = wallets.map(w => w.address);
+      const scores: Record<string, number> = {};
+      wallets.forEach(w => { scores[w.address] = w.score; });
+      const positions = await getMergedPositions(addresses, scores, 10, budget);
+
+      // Import here to avoid circular deps
+      const { placeClobOrder } = await import("./polymarketClient");
+      const settings = await storage.getBotSettings();
+      const pk  = settings.polyPrivateKey    || process.env.POLY_PRIVATE_KEY    || "";
+      const fdr = settings.polyFunderAddress || process.env.POLY_FUNDER_ADDRESS || "0xeb0ad9B38733D5e7A51F1120d2d2e63055aAC3Af";
+
+      const pkClean = pk.startsWith("0x") ? pk.slice(2) : pk;
+      if (pkClean.length !== 64) {
+        return res.status(400).json({ error: "POLY_PRIVATE_KEY not configured" });
+      }
+
+      const results: any[] = [];
+      for (const pos of positions) {
+        if (!pos.tokenId) { results.push({ market: pos.market, status: "skipped", reason: "no tokenId" }); continue; }
+        const size = pos.recommendedSize / pos.avgPrice;
+        const result = await placeClobOrder({
+          privateKey: pk, funderAddress: fdr,
+          tokenId: pos.tokenId, side: "BUY",
+          size: Math.round(size * 100) / 100,
+          price: pos.avgPrice, marketId: pos.marketId,
+        });
+        results.push({ market: pos.market, outcome: pos.outcome, status: result.status, orderId: result.orderId, error: result.error });
+        // Brief pause between orders
+        await new Promise(r => setTimeout(r, 300));
+      }
+      res.json({ placed: results.filter(r => r.status !== "failed").length, results });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 

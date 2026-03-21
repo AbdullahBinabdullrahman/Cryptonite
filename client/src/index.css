@@ -9,49 +9,49 @@
   :root {
     /* ── RETRO CRT PALETTE ──────────────────────────────────────── */
     /* Background: near-black CRT screen */
-    --background:    220 20% 4%;
-    --foreground:    120 100% 75%;   /* phosphor green */
+    --background:    220 20% 5%;
+    --foreground:    120 100% 82%;   /* bright phosphor green — more visible */
 
     /* Cards: slightly lighter CRT panel */
-    --card:          220 18% 7%;
-    --card-foreground: 120 100% 75%;
+    --card:          220 18% 9%;
+    --card-foreground: 120 100% 82%;
 
-    --popover:       220 18% 7%;
-    --popover-foreground: 120 100% 75%;
+    --popover:       220 18% 9%;
+    --popover-foreground: 120 100% 82%;
 
-    /* Primary: phosphor green */
-    --primary:       120 100% 50%;
+    /* Primary: bright phosphor green */
+    --primary:       120 100% 55%;
     --primary-foreground: 220 20% 4%;
 
     /* Secondary: dim CRT surface */
-    --secondary:     220 15% 10%;
-    --secondary-foreground: 120 60% 55%;
+    --secondary:     220 15% 13%;
+    --secondary-foreground: 120 70% 65%;
 
-    /* Muted */
-    --muted:         220 15% 10%;
-    --muted-foreground: 120 30% 40%;
+    /* Muted — less dark so text is readable */
+    --muted:         220 15% 12%;
+    --muted-foreground: 120 40% 55%;  /* was 40% — now more visible */
 
     /* Accent: amber/gold — "coin" color */
-    --accent:        45 100% 55%;
+    --accent:        45 100% 60%;
     --accent-foreground: 220 20% 4%;
 
     /* Destructive: alarm red */
-    --destructive:   0 90% 55%;
+    --destructive:   0 90% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    /* Borders: dim phosphor scan line */
-    --border:        120 40% 15%;
-    --input:         220 15% 10%;
-    --ring:          120 100% 50%;
+    /* Borders: brighter phosphor line — more visible */
+    --border:        120 50% 22%;  /* was 40% 15% — now clearly visible */
+    --input:         220 15% 12%;
+    --ring:          120 100% 55%;
     --radius:        0.125rem;   /* sharp pixel corners */
 
     /* ── Custom semantic tokens ────────────────────────────── */
-    --color-up:       120 100% 50%;   /* phosphor green = win */
-    --color-down:     0 90% 55%;      /* alarm red = loss */
-    --color-neutral:  120 30% 40%;    /* dim green */
-    --color-edge:     45 100% 55%;    /* amber coin */
-    --color-teal:     175 90% 50%;    /* cyan accent */
-    --color-surface-2: 220 15% 8%;
+    --color-up:       120 100% 60%;   /* phosphor green = win — brighter */
+    --color-down:     0 90% 62%;      /* alarm red = loss */
+    --color-neutral:  120 40% 55%;    /* dim green — more visible */
+    --color-edge:     45 100% 60%;    /* amber coin */
+    --color-teal:     175 90% 58%;    /* cyan accent */
+    --color-surface-2: 220 15% 10%;
 
     /* ── Retro font stack ───────────────────────────────────── */
     --font-pixel:   'Press Start 2P', monospace;
@@ -94,8 +94,8 @@ body {
     0deg,
     transparent,
     transparent 3px,
-    rgba(0, 0, 0, 0.12) 3px,
-    rgba(0, 0, 0, 0.12) 4px
+    rgba(0, 0, 0, 0.05) 4px,
+    rgba(0, 0, 0, 0.05) 5px
   );
 }
 
@@ -109,7 +109,7 @@ body {
   background: radial-gradient(
     ellipse at center,
     transparent 60%,
-    rgba(0, 0, 0, 0.55) 100%
+    rgba(0, 0, 0, 0.28) 100%
   );
 }
 
@@ -425,18 +425,18 @@ body {
 .retro-table { border-collapse: collapse; width: 100%; }
 .retro-table th {
   font-family: var(--font-pixel);
-  font-size: 7px;
+  font-size: 8px;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: hsl(120 50% 35%);
+  letter-spacing: 0.08em;
+  color: hsl(120 60% 50%);
   padding: 8px 12px;
   border-bottom: 1px solid hsl(120 40% 15%);
   text-align: left;
 }
 .retro-table td {
   font-family: var(--font-mono);
-  font-size: 12px;
-  color: hsl(120 80% 65%);
+  font-size: 13px;
+  color: hsl(120 90% 72%);
   padding: 8px 12px;
   border-bottom: 1px solid hsl(120 20% 10%);
 }
@@ -445,8 +445,8 @@ body {
 /* ── Console / terminal log line ──────────────────────────────────────────── */
 .console-line {
   font-family: var(--font-mono);
-  font-size: 11px;
-  color: hsl(120 70% 55%);
+  font-size: 12px;
+  color: hsl(120 80% 65%);
   line-height: 1.6;
   padding: 2px 0;
 }
