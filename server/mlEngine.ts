@@ -18,9 +18,8 @@ import Database from "better-sqlite3";
 import path from "path";
 
 // ─── DB setup ─────────────────────────────────────────────────────────────────
-const DB_PATH = process.env.NODE_ENV === "production"
-  ? "/data/polybot.db"
-  : path.resolve(process.cwd(), "data", "polybot.db");
+// Use same DB file as storage.ts — always at process.cwd()/polybot.db
+const DB_PATH = path.resolve(process.cwd(), "polybot.db");
 
 function getDb() {
   return new Database(DB_PATH, { fileMustExist: false });
