@@ -1,7 +1,7 @@
 import { Switch, Route, Link, useLocation, Router } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, setAuthToken } from "@/lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
 import Dashboard from "@/pages/Dashboard";
 import Markets from "@/pages/Markets";
@@ -325,11 +325,17 @@ function AppShell() {
 function AuthGate() {
   const [authedEmail, setAuthedEmail] = useState<string | null>(null);
 
+  // On mount, if a token exists in localStorage it is already loaded into
+  // _authToken (module-level init in queryClient.ts), so this request goes
+  // out with Authorization: Bearer <token> and the server validates it.
   const { data: authData, isLoading } = useQuery({
     queryKey: ["/api/auth/me"],
-    queryFn: () => apiRequest("GET", "/api/auth/me").then(r => r.json()).catch(() => ({ loggedIn: false })),
+    queryFn: () => apiRequest("GET", "/api/auth/me")
+      .then(r => r.json())
+      .catch(() => ({ loggedIn: false })),
     retry: false,
-    staleTime: 60000,
+    staleTime: 5 * 60 * 1000,   // re-validate every 5 min
+    refetchInterval: 5 * 60 * 1000,
   });
 
   if (isLoading) {

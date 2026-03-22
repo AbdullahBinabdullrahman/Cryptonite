@@ -6,14 +6,32 @@ const API_BASE = typeof window !== "undefined" && window.location.hostname !== "
   ? RENDER_URL
   : "";
 
-// ── In-memory JWT store ───────────────────────────────────────────────────────
-// Stored in module scope — survives page navigation but resets on hard refresh.
-// On refresh, /api/auth/me is called; if it fails, the user sees the login page
-// which re-issues a token (auto-filled email means one click to re-login).
-let _authToken: string | null = null;
+// ── Persistent JWT store (localStorage) ──────────────────────────────────────
+// Token is persisted to localStorage so it survives page refreshes and tab closes.
+// The JWT has a 30-day TTL — server validates expiry on every request.
+// On refresh the cached token is loaded immediately and sent to /api/auth/me.
 
-export function setAuthToken(token: string | null) { _authToken = token; }
+const LS_KEY = "polybot_auth_token";
+
+// Boot: load token from localStorage immediately when this module is imported
+let _authToken: string | null = (() => {
+  try { return localStorage.getItem(LS_KEY); } catch { return null; }
+})();
+
+export function setAuthToken(token: string | null) {
+  _authToken = token;
+  try {
+    if (token) localStorage.setItem(LS_KEY, token);
+    else       localStorage.removeItem(LS_KEY);
+  } catch { /* private/incognito mode or storage full — ignore */ }
+}
+
 export function getAuthToken(): string | null { return _authToken; }
+
+export function clearAuthToken() {
+  _authToken = null;
+  try { localStorage.removeItem(LS_KEY); } catch { }
+}
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const h: Record<string, string> = { ...extra };
