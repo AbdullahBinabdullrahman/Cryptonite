@@ -335,22 +335,32 @@ export function issueToken(userId: number): string {
   return jwt.sign({ uid: userId }, JWT_SECRET, { expiresIn: JWT_TTL });
 }
 
-/** Extract userId from session cookie OR Bearer token */
+/** Extract userId from session cookie OR Bearer token OR auth cookie */
 export function getUserIdFromRequest(req: Request): number | null {
   // 1. Session cookie (legacy path — keep working if it does)
   const sessionId = (req.session as any)?.userId;
   if (sessionId) return sessionId;
 
-  // 2. Authorization: Bearer <token>
+  // 2. Authorization: Bearer <token> (from in-memory / localStorage client)
   const authHeader = req.headers["authorization"] || "";
   if (authHeader.startsWith("Bearer ")) {
     try {
       const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as any;
       return payload?.uid ?? null;
-    } catch (_) { return null; }
+    } catch (_) { /* fall through */ }
   }
 
-  // 3. X-Auth-Token header (fallback)
+  // 3. HttpOnly cookie 'polybot_token' — set by server on login,
+  //    survives page refresh and iframe sandboxing without needing localStorage.
+  const cookieToken = req.cookies?.polybot_token;
+  if (cookieToken) {
+    try {
+      const payload = jwt.verify(cookieToken, JWT_SECRET) as any;
+      return payload?.uid ?? null;
+    } catch (_) { /* expired / invalid */ }
+  }
+
+  // 4. X-Auth-Token header (fallback)
   const tokenHeader = req.headers["x-auth-token"] as string | undefined;
   if (tokenHeader) {
     try {
@@ -360,4 +370,16 @@ export function getUserIdFromRequest(req: Request): number | null {
   }
 
   return null;
+}
+
+/** Set the JWT auth cookie on a response (called after successful login) */
+export function setAuthCookie(res: any, token: string): void {
+  const isProduction = process.env.NODE_ENV === "production";
+  res.cookie("polybot_token", token, {
+    httpOnly: true,           // not accessible from JS
+    secure: isProduction,     // HTTPS only in production
+    sameSite: isProduction ? "none" : "lax",  // cross-origin (Perplexity iframe)
+    maxAge: 30 * 24 * 60 * 60 * 1000,        // 30 days
+    path: "/",
+  });
 }

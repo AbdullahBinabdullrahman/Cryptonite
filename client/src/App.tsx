@@ -325,9 +325,9 @@ function AppShell() {
 function AuthGate() {
   const [authedEmail, setAuthedEmail] = useState<string | null>(null);
 
-  // On mount, if a token exists in localStorage it is already loaded into
-  // _authToken (module-level init in queryClient.ts), so this request goes
-  // out with Authorization: Bearer <token> and the server validates it.
+  // On mount, the browser automatically sends the HttpOnly 'polybot_token'
+  // cookie (set by the server on login) with this request. The server reads
+  // the cookie and returns { loggedIn: true } if the JWT is still valid.
   const { data: authData, isLoading } = useQuery({
     queryKey: ["/api/auth/me"],
     queryFn: () => apiRequest("GET", "/api/auth/me")

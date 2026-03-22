@@ -6,31 +6,23 @@ const API_BASE = typeof window !== "undefined" && window.location.hostname !== "
   ? RENDER_URL
   : "";
 
-// ── Persistent JWT store (localStorage) ──────────────────────────────────────
-// Token is persisted to localStorage so it survives page refreshes and tab closes.
-// The JWT has a 30-day TTL — server validates expiry on every request.
-// On refresh the cached token is loaded immediately and sent to /api/auth/me.
+// ── In-memory JWT store ───────────────────────────────────────────────────────
+// The server sets an HttpOnly cookie (polybot_token) on login.
+// That cookie is automatically sent by the browser on every request — including
+// after page refreshes — so no client-side persistence is needed here.
+// The Bearer token is kept in memory as a secondary auth path (e.g. same-tab
+// API calls that need it in headers).
 
-const LS_KEY = "polybot_auth_token";
-
-// Boot: load token from localStorage immediately when this module is imported
-let _authToken: string | null = (() => {
-  try { return localStorage.getItem(LS_KEY); } catch { return null; }
-})();
+let _authToken: string | null = null;
 
 export function setAuthToken(token: string | null) {
   _authToken = token;
-  try {
-    if (token) localStorage.setItem(LS_KEY, token);
-    else       localStorage.removeItem(LS_KEY);
-  } catch { /* private/incognito mode or storage full — ignore */ }
 }
 
 export function getAuthToken(): string | null { return _authToken; }
 
 export function clearAuthToken() {
   _authToken = null;
-  try { localStorage.removeItem(LS_KEY); } catch { }
 }
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
@@ -55,10 +47,10 @@ export async function apiRequest(
     method,
     headers: authHeaders(data ? { "Content-Type": "application/json" } : {}),
     body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
+    credentials: "include",   // sends HttpOnly cookie automatically
   });
 
-  // If the response contains a new token (login/verify), store it
+  // If the response contains a new token (login/verify), store it in-memory
   if (res.headers.get("content-type")?.includes("application/json")) {
     const clone = res.clone();
     clone.json().then(d => { if (d?.token) setAuthToken(d.token); }).catch(() => {});
@@ -76,7 +68,7 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     const res = await fetch(`${API_BASE}${queryKey.join("/")}`, {
       headers: authHeaders(),
-      credentials: "include",
+      credentials: "include",   // sends HttpOnly cookie automatically
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

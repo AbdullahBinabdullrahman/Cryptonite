@@ -11,7 +11,7 @@ import { fetchWalletPositions } from "./polymarketClient";
 import {
   sendOtpEmail, verifyOtp, verifyTotp,
   generateTotpSetup, enableTotp, getUserById, requireAuth,
-  setUserPassword, verifyPassword, issueToken, getUserIdFromRequest,
+  setUserPassword, verifyPassword, issueToken, getUserIdFromRequest, setAuthCookie,
 } from "./auth";
 import { z } from "zod";
 import { getMLStats } from "./mlEngine";
@@ -71,6 +71,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     req.session.save(() => {
       const user = getUserById(result.userId!);
       const token = issueToken(result.userId!);
+      setAuthCookie(res, token);
       res.json({ ok: true, email: user.email, totpEnabled: !!user.totp_enabled, token });
     });
   });
@@ -114,6 +115,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     req.session.save(() => {
       const user = getUserById(result.userId!);
       const token = issueToken(result.userId!);
+      setAuthCookie(res, token);
       res.json({ ok: true, email: user.email, totpEnabled: false, token });
     });
   });
