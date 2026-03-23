@@ -340,6 +340,50 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ ok: true, message: "CLOB strategy stopped" });
   });
 
+  // Debug: test Polymarket CLOB auth (does NOT place a real order)
+  app.get("/api/clob/test-auth", requireAuth, async (req: any, res) => {
+    try {
+      const { Wallet } = await import("ethers");
+      const pk = process.env.POLY_PRIVATE_KEY || "";
+      if (!pk) return res.json({ ok: false, error: "POLY_PRIVATE_KEY not set in env" });
+      const pkNorm = pk.startsWith("0x") ? pk : "0x" + pk;
+      const wallet = new Wallet(pkNorm);
+      const addr = wallet.address;
+      const funder = process.env.POLY_FUNDER_ADDRESS || "";
+      const match = addr.toLowerCase() === funder.toLowerCase();
+
+      // Try L1 auth
+      const ts = Math.floor(Date.now() / 1000);
+      const domain = { name: "ClobAuthDomain", version: "1", chainId: 137 };
+      const types = { ClobAuth: [
+        { name: "address", type: "address" }, { name: "timestamp", type: "string" },
+        { name: "nonce", type: "uint256" }, { name: "message", type: "string" },
+      ] };
+      const sig = await wallet.signTypedData(domain, types, {
+        address: addr, timestamp: String(ts), nonce: 0,
+        message: "This message attests that I control the given wallet",
+      });
+
+      const authRes = await fetch("https://clob.polymarket.com/auth/api-key", {
+        headers: { "POLY_ADDRESS": addr, "POLY_SIGNATURE": sig, "POLY_TIMESTAMP": String(ts), "POLY_NONCE": "0" },
+        signal: AbortSignal.timeout(15000),
+      });
+      const authBody = await authRes.json();
+      res.json({
+        ok: authRes.ok,
+        walletAddress: addr,
+        funderMatch: match,
+        funder,
+        l1Status: authRes.status,
+        apiKeyPreview: authBody.apiKey ? authBody.apiKey.slice(0, 8) + "..." : null,
+        error: authBody.error || authBody.message || null,
+        rawResponse: authBody,
+      });
+    } catch (e: any) {
+      res.json({ ok: false, error: e.message });
+    }
+  });
+
   // ─── Bot Controls ─────────────────────────────────────────────────────────
 
   app.post("/api/bot/start", async (_req, res) => {
