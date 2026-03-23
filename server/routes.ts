@@ -364,7 +364,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         message: "This message attests that I control the given wallet",
       });
 
-      const authRes = await fetch("https://clob.polymarket.com/auth/api-key", {
+      const authRes = await fetch("https://clob.polymarket.com/auth/derive-api-key", {
         headers: { "POLY_ADDRESS": addr, "POLY_SIGNATURE": sig, "POLY_TIMESTAMP": String(ts), "POLY_NONCE": "0" },
         signal: AbortSignal.timeout(15000),
       });

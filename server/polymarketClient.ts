@@ -180,7 +180,8 @@ async function getApiCreds(wallet: Wallet): Promise<ApiCreds | null> {
 
   try {
     const headers = await buildL1Headers(wallet);
-    const res = await fetch(`${CLOB_API}/auth/api-key`, {
+    // GET /auth/derive-api-key — derives a deterministic API key from the L1 signature
+    const res = await fetch(`${CLOB_API}/auth/derive-api-key`, {
       method: "GET",
       headers,
       signal: AbortSignal.timeout(15000),
@@ -188,35 +189,18 @@ async function getApiCreds(wallet: Wallet): Promise<ApiCreds | null> {
 
     if (!res.ok) {
       const errText = await res.text();
-      console.warn(`[PolyClient] /auth/api-key failed ${res.status}: ${errText}`);
+      console.warn(`[PolyClient] /auth/derive-api-key failed ${res.status}: ${errText}`);
       return null;
     }
 
     const body = await res.json() as any;
-    // Response: { apiKey, secret, passphrase } or { key, secret, passphrase }
+    // Response: { apiKey, secret, passphrase }
     const creds: ApiCreds = {
       key:        body.apiKey || body.key || "",
       secret:     body.secret || "",
       passphrase: body.passphrase || "",
       derivedAt:  Date.now(),
     };
-
-    if (!creds.key) {
-      // Try creating a new key if derivation returned empty
-      console.warn("[PolyClient] API key derivation returned empty key, trying POST /auth/api-key");
-      const createRes = await fetch(`${CLOB_API}/auth/api-key`, {
-        method: "POST",
-        headers,
-        signal: AbortSignal.timeout(15000),
-      });
-      if (createRes.ok) {
-        const cb = await createRes.json() as any;
-        creds.key        = cb.apiKey || cb.key || "";
-        creds.secret     = cb.secret || "";
-        creds.passphrase = cb.passphrase || "";
-        creds.derivedAt  = Date.now();
-      }
-    }
 
     if (!creds.key) {
       console.warn("[PolyClient] Could not obtain API key from Polymarket");
