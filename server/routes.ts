@@ -931,6 +931,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Admin: Fix balance (removes simulated trade impact) ──────────────────
+  app.post("/api/admin/fix-balance", requireAuth, async (_req, res) => {
+    try {
+      // Recalculate true balance: starting balance + sum of non-simulated resolved PnL
+      const allTrades = await storage.getTrades(10000);
+      const realPnl = allTrades
+        .filter(t => t.status === "won" || t.status === "lost")
+        .filter(t => !t.alpacaOrderId?.startsWith("sim-") && t.alpacaOrderStatus !== "clob:simulated")
+        .reduce((s, t) => s + (t.pnl || 0), 0);
+
+      // Base starting balance from context: $2017 USDC on live Polymarket wallet
+      const POLY_STARTING_BALANCE = 2017;
+      const correctedBalance = Math.round((POLY_STARTING_BALANCE + realPnl) * 100) / 100;
+
+      await storage.updateBotSettings({ totalBalance: correctedBalance });
+      console.log(`[Admin] Balance corrected to $${correctedBalance} (real PnL: $${realPnl.toFixed(2)})`);
+      res.json({ ok: true, correctedBalance, realPnl });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── Self-ping to prevent Render free tier from sleeping ─────────────────────
   // Pings itself every 14 minutes so the service never idles out
   if (process.env.NODE_ENV === "production" && process.env.RENDER_EXTERNAL_URL) {

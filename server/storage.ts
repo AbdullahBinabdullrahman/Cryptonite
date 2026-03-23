@@ -189,6 +189,7 @@ export interface IStorage {
   updateBotSettings(settings: Partial<InsertBotSettings>): Promise<BotSettings>;
 
   getTrades(limit?: number): Promise<Trade[]>;
+  getTradesSince(since: Date): Promise<Trade[]>;
   getOpenTrades(): Promise<Trade[]>;
   createTrade(trade: InsertTrade): Promise<Trade>;
   resolveTrade(id: number, status: "won" | "lost", pnl: number): Promise<Trade>;
@@ -237,6 +238,13 @@ class SqliteStorage implements IStorage {
     const rows = db.select().from(schema.trades)
       .orderBy(desc(schema.trades.createdAt))
       .limit(limit)
+      .all();
+    return rows.map(mapTrade);
+  }
+
+  async getTradesSince(since: Date): Promise<Trade[]> {
+    const rows = db.select().from(schema.trades)
+      .where(gte(schema.trades.createdAt, since))
       .all();
     return rows.map(mapTrade);
   }

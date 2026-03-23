@@ -27,31 +27,48 @@ const MAX_KELLY   = 0.05;   // cap Kelly at 5% of balance per trade
 const MIN_BET     = 10.0;   // $10 minimum
 const MAX_BET     = 100.0;  // $100 maximum per trade
 const TICK_MS     = 10000;  // 10 seconds
-const MAX_PER_DAY = 200;    // max 200 CLOB trades/day (was 1000 — reduces fee erosion)
-const MAX_PER_TICK = 2;     // max 2 bets per tick
+const MAX_PER_DAY = 20;     // max 20 CLOB trades/day — avoid overtrading
+const MAX_PER_TICK = 1;     // max 1 bet per tick — controlled pacing
 const STALE_POSITION_MS = 24 * 60 * 60 * 1000; // 24 hours — positions older than this are auto-resolved
 
 // ─── Order book imbalance cache ───────────────────────────────────────────────
 // Stores latest bid/ask imbalance per tokenId: >0 = buy pressure, <0 = sell pressure
 const obImbalanceCache: Map<string, { imbalance: number; ts: number }> = new Map();
 
-// ─── Per-session deduplication ────────────────────────────────────────────────
-// Track marketIds+side already bet in this server session to prevent repeat bets.
-// Reset on server restart (intentional — new session = fresh scan).
+// ─── DB-backed deduplication ─────────────────────────────────────────────────
+// On startup, load today's traded conditionIds from DB so server restarts
+// don't cause duplicate bets. In-memory Set is rebuilt from DB on init.
 // Format: "<conditionId>:<YES|NO>"
-const sessionBets: Set<string> = new Set();
+const dailyBets: Set<string> = new Set();
+let dedupDayKey = new Date().toISOString().slice(0, 10);
+let dedupInitialized = false;
 
-// Per-day dedup: reset at midnight UTC
-let dedupDayKey = new Date().toISOString().slice(0, 10); // "2026-03-21"
-const dailyBets: Set<string> = new Set(); // "<conditionId>:<YES|NO>"
+async function initDedupFromDB(): Promise<void> {
+  if (dedupInitialized) return;
+  try {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayTrades = await storage.getTradesSince(todayStart);
+    for (const t of todayTrades) {
+      if (t.marketId && t.direction) {
+        dailyBets.add(`${t.marketId}:${t.direction}`);
+      }
+    }
+    dedupInitialized = true;
+    console.log(`[CLOBv2] Loaded ${dailyBets.size} dedup entries from DB for today`);
+  } catch (err) {
+    console.warn("[CLOBv2] Could not init dedup from DB:", err);
+    dedupInitialized = true; // still mark as initialized to avoid infinite retries
+  }
+}
 
 function getDailyBetKey(conditionId: string, side: string): string {
-  // Reset if day rolled over
   const todayKey = new Date().toISOString().slice(0, 10);
   if (todayKey !== dedupDayKey) {
     dedupDayKey = todayKey;
     dailyBets.clear();
-    console.log("[CLOBv2] Daily dedup set reset for new day:", todayKey);
+    dedupInitialized = false; // reload from DB for new day
+    console.log("[CLOBv2] Daily dedup reset for new day:", todayKey);
   }
   return `${conditionId}:${side}`;
 }
@@ -63,7 +80,6 @@ function hasAlreadyBetToday(conditionId: string, side: string): boolean {
 function markBetToday(conditionId: string, side: string): void {
   const key = getDailyBetKey(conditionId, side);
   dailyBets.add(key);
-  sessionBets.add(key); // also mark in session set
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -531,9 +547,17 @@ async function clearStalePositions(): Promise<void> {
         trade.alpacaOrderStatus?.startsWith("clob") ||
         (!trade.alpacaOrderStatus && (trade.marketId?.length ?? 0) > 10);
       if (!isClobTrade) continue;
+      // NEVER drain balance for simulated orders — they were never real
+      const isSimulated = trade.alpacaOrderStatus === "clob:simulated" ||
+        trade.alpacaOrderId?.startsWith("sim-");
       const ageMs = now - new Date(trade.createdAt).getTime();
       if (ageMs > STALE_POSITION_MS) {
-        await storage.resolveTrade(trade.id, "lost", -trade.betSize);
+        if (isSimulated) {
+          // Resolve simulated trades with $0 PnL — they never touched the wallet
+          await storage.resolveTrade(trade.id, "lost", 0);
+        } else {
+          await storage.resolveTrade(trade.id, "lost", -trade.betSize);
+        }
         cleared++;
       }
     }
@@ -555,6 +579,9 @@ export function startClobStrategy() {
 
   clobInterval = setInterval(async () => {
     try {
+      // Rebuild DB-backed dedup on startup/new day
+      await initDedupFromDB();
+
       const settings = await storage.getBotSettings();
       if (!settings.isRunning) return;
 
