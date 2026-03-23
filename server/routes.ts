@@ -931,6 +931,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Admin: Trigger Render redeploy via deploy hook ─────────────────
+  app.post("/api/admin/redeploy", requireAuth, async (_req, res) => {
+    const hook = process.env.RENDER_DEPLOY_HOOK;
+    if (!hook) return res.status(400).json({ error: "RENDER_DEPLOY_HOOK not set in env vars" });
+    try {
+      const r = await fetch(hook, { method: "GET", signal: AbortSignal.timeout(10000) });
+      res.json({ ok: true, status: r.status, message: "Deploy triggered" });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── Admin: Fix balance (removes simulated trade impact) ──────────────────
   app.post("/api/admin/fix-balance", requireAuth, async (_req, res) => {
     try {
