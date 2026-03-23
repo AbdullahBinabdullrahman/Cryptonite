@@ -366,17 +366,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const authRes = await fetch("https://clob.polymarket.com/auth/derive-api-key", {
         headers: { "POLY_ADDRESS": addr, "POLY_SIGNATURE": sig, "POLY_TIMESTAMP": String(ts), "POLY_NONCE": "0" },
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(20000),
       });
-      const authBody = await authRes.json();
+      const rawText = await authRes.text();
+      let authBody: any = {};
+      try { authBody = JSON.parse(rawText); } catch { authBody = { raw: rawText }; }
       res.json({
-        ok: authRes.ok,
+        ok: authRes.ok && !!authBody.apiKey,
         walletAddress: addr,
         funderMatch: match,
         funder,
         l1Status: authRes.status,
         apiKeyPreview: authBody.apiKey ? authBody.apiKey.slice(0, 8) + "..." : null,
-        error: authBody.error || authBody.message || null,
+        error: authBody.error || authBody.message || authBody.raw || null,
         rawResponse: authBody,
       });
     } catch (e: any) {

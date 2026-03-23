@@ -187,13 +187,17 @@ async function getApiCreds(wallet: Wallet): Promise<ApiCreds | null> {
       signal: AbortSignal.timeout(15000),
     });
 
+    const rawText = await res.text();
     if (!res.ok) {
-      const errText = await res.text();
-      console.warn(`[PolyClient] /auth/derive-api-key failed ${res.status}: ${errText}`);
+      console.warn(`[PolyClient] /auth/derive-api-key failed ${res.status}: ${rawText}`);
       return null;
     }
 
-    const body = await res.json() as any;
+    let body: any = {};
+    try { body = JSON.parse(rawText); } catch {
+      console.warn(`[PolyClient] /auth/derive-api-key non-JSON response: ${rawText.slice(0, 100)}`);
+      return null;
+    }
     // Response: { apiKey, secret, passphrase }
     const creds: ApiCreds = {
       key:        body.apiKey || body.key || "",
