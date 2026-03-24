@@ -6,21 +6,21 @@ const API_BASE = typeof window !== "undefined" && window.location.hostname !== "
   ? RENDER_URL
   : "";
 
-// ── Persistent JWT store (localStorage + in-memory) ─────────────────────────
-// Token is persisted in localStorage so it survives page refreshes.
+// ── Persistent JWT store (sessionStorage + in-memory) ─────────────────────────
+// Token is persisted in sessionStorage so it survives page refreshes.
 // On every request, Bearer header is sent — no cross-origin cookie dependency.
 
 const TOKEN_KEY = "polybot_jwt";
 
 let _authToken: string | null = (() => {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+  try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
 })();
 
 export function setAuthToken(token: string | null) {
   _authToken = token;
   try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
+    if (token) sessionStorage.setItem(TOKEN_KEY, token);
+    else sessionStorage.removeItem(TOKEN_KEY);
   } catch { /* storage blocked in some iframe contexts */ }
 }
 
@@ -28,7 +28,7 @@ export function getAuthToken(): string | null { return _authToken; }
 
 export function clearAuthToken() {
   _authToken = null;
-  try { localStorage.removeItem(TOKEN_KEY); } catch {}
+  try { sessionStorage.removeItem(TOKEN_KEY); } catch {}
 }
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
