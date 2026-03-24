@@ -10,14 +10,14 @@
     /* ── RETRO CRT PALETTE ──────────────────────────────────────── */
     /* Background: near-black CRT screen */
     --background:    220 20% 5%;
-    --foreground:    120 100% 82%;   /* bright phosphor green — more visible */
+    --foreground:    120 100% 95%;   /* very bright phosphor green */
 
     /* Cards: slightly lighter CRT panel */
     --card:          220 18% 9%;
-    --card-foreground: 120 100% 82%;
+    --card-foreground: 120 100% 95%;
 
     --popover:       220 18% 9%;
-    --popover-foreground: 120 100% 82%;
+    --popover-foreground: 120 100% 95%;
 
     /* Primary: bright phosphor green */
     --primary:       120 100% 55%;
@@ -25,11 +25,11 @@
 
     /* Secondary: dim CRT surface */
     --secondary:     220 15% 13%;
-    --secondary-foreground: 120 70% 65%;
+    --secondary-foreground: 120 80% 80%;
 
     /* Muted — less dark so text is readable */
     --muted:         220 15% 12%;
-    --muted-foreground: 120 40% 55%;  /* was 40% — now more visible */
+    --muted-foreground: 120 70% 72%;  /* highly visible */
 
     /* Accent: amber/gold — "coin" color */
     --accent:        45 100% 60%;
@@ -40,7 +40,7 @@
     --destructive-foreground: 0 0% 100%;
 
     /* Borders: brighter phosphor line — more visible */
-    --border:        120 50% 22%;  /* was 40% 15% — now clearly visible */
+    --border:        120 60% 32%;  /* very visible green border */
     --input:         220 15% 12%;
     --ring:          120 100% 55%;
     --radius:        0.125rem;   /* sharp pixel corners */
@@ -48,7 +48,7 @@
     /* ── Custom semantic tokens ────────────────────────────── */
     --color-up:       120 100% 60%;   /* phosphor green = win — brighter */
     --color-down:     0 90% 62%;      /* alarm red = loss */
-    --color-neutral:  120 40% 55%;    /* dim green — more visible */
+    --color-neutral:  120 70% 72%;    /* readable neutral */
     --color-edge:     45 100% 60%;    /* amber coin */
     --color-teal:     175 90% 58%;    /* cyan accent */
     --color-surface-2: 220 15% 10%;
@@ -94,8 +94,8 @@ body {
     0deg,
     transparent,
     transparent 3px,
-    rgba(0, 0, 0, 0.05) 4px,
-    rgba(0, 0, 0, 0.05) 5px
+    rgba(0, 0, 0, 0.02) 4px,
+    rgba(0, 0, 0, 0.02) 5px
   );
 }
 

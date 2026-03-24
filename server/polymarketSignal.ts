@@ -261,15 +261,16 @@ export async function crowdConfirms(asset: string, direction: "buy" | "sell"): P
   const signal = await getPolySignal(asset);
 
   if (!signal) {
-    // No Polymarket data — BLOCK trade (prevents spam when signal feed is down)
-    return { confirmed: false, signal: null, reason: "no polymarket data — blocking to prevent overtrading" };
+    // No Polymarket data — allow trade with neutral confirmation (don’t block Alpaca)
+    return { confirmed: true, signal: null, reason: "no polymarket data — allowing trade (neutral)" };
   }
 
   if (signal.crowdDirection === "neutral") {
+    // Crowd is neutral — allow Alpaca to trade based on technical signals alone
     return {
-      confirmed: false,
+      confirmed: true,
       signal,
-      reason: `crowd neutral (${(signal.yesPrice * 100).toFixed(0)}% YES) — skipping`,
+      reason: `crowd neutral (${(signal.yesPrice * 100).toFixed(0)}% YES) — allowing technical trade`,
     };
   }
 

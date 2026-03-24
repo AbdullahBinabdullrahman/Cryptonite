@@ -325,17 +325,17 @@ function AppShell() {
 function AuthGate() {
   const [authedEmail, setAuthedEmail] = useState<string | null>(null);
 
-  // On mount, the browser automatically sends the HttpOnly 'polybot_token'
-  // cookie (set by the server on login) with this request. The server reads
-  // the cookie and returns { loggedIn: true } if the JWT is still valid.
+  // On mount: send Bearer token from localStorage (+ HttpOnly cookie as backup).
+  // Server validates and returns { loggedIn: true } if token is still valid.
+  // This means refresh never logs you out as long as the 30-day JWT is valid.
   const { data: authData, isLoading } = useQuery({
     queryKey: ["/api/auth/me"],
     queryFn: () => apiRequest("GET", "/api/auth/me")
       .then(r => r.json())
       .catch(() => ({ loggedIn: false })),
-    retry: false,
-    staleTime: 5 * 60 * 1000,   // re-validate every 5 min
-    refetchInterval: 5 * 60 * 1000,
+    retry: 1,
+    staleTime: 10 * 60 * 1000,
+    refetchInterval: 10 * 60 * 1000,
   });
 
   if (isLoading) {
