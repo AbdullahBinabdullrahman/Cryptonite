@@ -6,29 +6,22 @@ const API_BASE = typeof window !== "undefined" && window.location.hostname !== "
   ? RENDER_URL
   : "";
 
-// ── Persistent JWT store (sessionStorage + in-memory) ─────────────────────────
-// Token is persisted in sessionStorage so it survives page refreshes.
-// On every request, Bearer header is sent — no cross-origin cookie dependency.
+// ── In-memory JWT store ───────────────────────────────────────────────────────
+// Token is kept in memory. The server also sets an HttpOnly cookie on login
+// which is sent automatically by the browser on all requests (including refresh).
+// The /api/auth/me endpoint checks the cookie, so refresh stays logged in
+// as long as the browser sends the cookie.
 
-const TOKEN_KEY = "polybot_jwt";
-
-let _authToken: string | null = (() => {
-  try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
-})();
+let _authToken: string | null = null;
 
 export function setAuthToken(token: string | null) {
   _authToken = token;
-  try {
-    if (token) sessionStorage.setItem(TOKEN_KEY, token);
-    else sessionStorage.removeItem(TOKEN_KEY);
-  } catch { /* storage blocked in some iframe contexts */ }
 }
 
 export function getAuthToken(): string | null { return _authToken; }
 
 export function clearAuthToken() {
   _authToken = null;
-  try { sessionStorage.removeItem(TOKEN_KEY); } catch {}
 }
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
@@ -53,10 +46,10 @@ export async function apiRequest(
     method,
     headers: authHeaders(data ? { "Content-Type": "application/json" } : {}),
     body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",   // sends HttpOnly cookie as backup
+    credentials: "include",   // sends HttpOnly cookie automatically
   });
 
-  // If the response contains a new token (login/verify), store it persistently
+  // If the response contains a new token (login/verify), store it in-memory
   if (res.headers.get("content-type")?.includes("application/json")) {
     const clone = res.clone();
     clone.json().then(d => { if (d?.token) setAuthToken(d.token); }).catch(() => {});
