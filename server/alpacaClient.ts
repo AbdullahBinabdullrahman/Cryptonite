@@ -98,20 +98,16 @@ export async function fetchAlpacaAccount(
     return { ok: false, error: "No API credentials configured." };
   }
 
-  // Try live first, then fall back to paper
+  // Use key prefix to determine live vs paper (AK = live, PK = paper)
+  const isLiveKey = apiKey.startsWith("AK");
+  const baseUrl = isLiveKey
+    ? "https://api.alpaca.markets"
+    : "https://paper-api.alpaca.markets";
+
   try {
-    const account = await tryFetch("https://api.alpaca.markets", apiKey, apiSecret);
-    return { ok: true, account, isLive: true };
-  } catch (liveErr: any) {
-    // If it's a 403/401, try paper trading endpoint
-    try {
-      const account = await tryFetch("https://paper-api.alpaca.markets", apiKey, apiSecret);
-      return { ok: true, account, isLive: false };
-    } catch (paperErr: any) {
-      return {
-        ok: false,
-        error: `Live: ${liveErr.message} | Paper: ${paperErr.message}`,
-      };
-    }
+    const account = await tryFetch(baseUrl, apiKey, apiSecret);
+    return { ok: true, account, isLive: isLiveKey };
+  } catch (err: any) {
+    return { ok: false, error: err.message };
   }
 }

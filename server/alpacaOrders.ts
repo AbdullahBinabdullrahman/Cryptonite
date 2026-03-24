@@ -91,25 +91,22 @@ export async function placeAlpacaOrder(
     time_in_force: "gtc",           // good-till-canceled (required for crypto)
   };
 
-  // Try live first, then paper
-  for (const [baseUrl, isLive] of [
-    ["https://api.alpaca.markets", true],
-    ["https://paper-api.alpaca.markets", false],
-  ] as [string, boolean][]) {
-    try {
-      const order = await postOrder(baseUrl, apiKey, apiSecret, body);
-      console.log(`[AlpacaOrders] ${isLive ? "LIVE" : "PAPER"} order placed: ${side.toUpperCase()} $${notional} BTC — order ID: ${order.id}`);
-      return { ok: true, order, isLive };
-    } catch (err: any) {
-      // If 403/401 on live, fall through to paper
-      if (isLive && (err.message.includes("403") || err.message.includes("401") || err.message.includes("forbidden"))) {
-        continue;
-      }
-      return { ok: false, error: err.message };
-    }
-  }
+  // Detect if this is a live key (starts with 'AK') or paper key (starts with 'PK')
+  const isLiveKey = apiKey.startsWith("AK");
+  const baseUrl = isLiveKey
+    ? "https://api.alpaca.markets"
+    : "https://paper-api.alpaca.markets";
 
-  return { ok: false, error: "Failed to place order on both live and paper endpoints." };
+  try {
+    const order = await postOrder(baseUrl, apiKey, apiSecret, body);
+    const isLive = isLiveKey;
+    console.log(`[AlpacaOrders] ${isLive ? "LIVE" : "PAPER"} order placed: ${side.toUpperCase()} $${notional} ${symbol} — order ID: ${order.id}`);
+    return { ok: true, order, isLive };
+  } catch (err: any) {
+    // Never silently fall back to paper — fail loudly so user knows
+    console.error(`[AlpacaOrders] Order FAILED on ${isLiveKey ? "LIVE" : "PAPER"} endpoint: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
 }
 
 /**
