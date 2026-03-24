@@ -286,6 +286,7 @@ const ORDER_TYPES = {
 
 async function buildSignedOrder(
   wallet: Wallet,
+  funderAddress: string,
   tokenId: string,
   side: "BUY" | "SELL",
   usdcAmount: bigint,
@@ -295,6 +296,12 @@ async function buildSignedOrder(
   const exchange = useNegRisk ? NEG_RISK_CTF : CTF_EXCHANGE;
 
   const salt = BigInt("0x" + hexlify(randomBytes(32)).slice(2, 18));
+
+  // signatureType=2 means EOA proxy: maker=funder, signer=signing key
+  // If funder == signer (no proxy), use signatureType=0 (EOA direct)
+  const isProxy = funderAddress.toLowerCase() !== wallet.address.toLowerCase();
+  const makerAddr = isProxy ? funderAddress : wallet.address;
+  const sigType   = isProxy ? 2 : 0; // 2 = POLY_PROXY, 0 = EOA
 
   const domain = {
     name:              "ClobAuthDomain",
@@ -307,7 +314,7 @@ async function buildSignedOrder(
 
   const orderData = {
     salt,
-    maker:         wallet.address,
+    maker:         makerAddr,
     signer:        wallet.address,
     taker:         "0x0000000000000000000000000000000000000000",
     tokenId:       BigInt(rawTokenIdStr),
@@ -317,14 +324,14 @@ async function buildSignedOrder(
     nonce:         0n,
     feeRateBps:    0n,
     side:          side === "BUY" ? 0 : 1,
-    signatureType: 0, // EOA
+    signatureType: sigType,
   };
 
   const signature = await wallet.signTypedData(domain, ORDER_TYPES, orderData);
 
   return {
     salt:          salt.toString(),
-    maker:         wallet.address,
+    maker:         makerAddr,
     signer:        wallet.address,
     taker:         "0x0000000000000000000000000000000000000000",
     tokenId:       rawTokenIdStr,
@@ -334,7 +341,7 @@ async function buildSignedOrder(
     nonce:         "0",
     feeRateBps:    "0",
     side:          side === "BUY" ? 0 : 1,
-    signatureType: 0,
+    signatureType: sigType,
     signature,
   };
 }
@@ -379,12 +386,15 @@ export async function placeClobOrder(opts: {
     const usdcAmount   = BigInt(Math.round(size * price * 1_000_000));   // maker pays USDC
     const sharesAmount = BigInt(Math.round(size * 1_000_000));            // taker receives shares
 
-    const signedOrder = await buildSignedOrder(wallet, tokenId, side, usdcAmount, sharesAmount);
+    const signedOrder = await buildSignedOrder(wallet, opts.funderAddress, tokenId, side, usdcAmount, sharesAmount);
+
+    // owner = the funder/proxy address that holds USDC
+    const ownerAddr = opts.funderAddress || wallet.address;
 
     // Step 3: Serialize body for signing
     const payload = {
       order:     signedOrder,
-      owner:     wallet.address,
+      owner:     ownerAddr,
       orderType: "GTC",
     };
     const bodyStr = JSON.stringify(payload);
